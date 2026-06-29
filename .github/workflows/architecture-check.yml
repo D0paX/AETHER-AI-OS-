@@ -1,0 +1,31 @@
+name: Architecture Compliance
+
+on:
+  push:
+    branches: ["**"]
+
+jobs:
+  boundary-check:
+    name: Module Boundary Enforcement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync
+      - run: uv run lint-imports
+      - name: Verify no direct DB access outside memory module
+        run: |
+          if grep -r "qdrant_client\|sqlalchemy\|aiosqlite\|sqlite3" \
+            aether/agents/ aether/tools/ aether/tasks/ aether/session/ aether/interfaces/ \
+            --include="*.py" 2>/dev/null; then
+            echo "DATABASE ACCESS VIOLATION FOUND OUTSIDE MEMORY MODULE"
+            exit 1
+          fi
+      - name: Verify no direct LLM provider access outside llm module
+        run: |
+          if grep -r "import anthropic\|import openai\|import litellm\|import google.generativeai" \
+            aether/agents/ aether/memory/ aether/tools/ aether/tasks/ aether/session/ \
+            --include="*.py" 2>/dev/null; then
+            echo "LLM PROVIDER ACCESS VIOLATION FOUND OUTSIDE LLM MODULE"
+            exit 1
+          fi

@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Aether runtime data (NEVER commit)
+data/
+logs/
+backups/
+
+# Local configuration and secrets (NEVER commit)
+.env
+config/local.yaml
+.aether/local_permissions.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker overrides (machine-specific)
+infrastructure/docker/docker-compose.override.yml

@@ -1,0 +1,48 @@
+version: "1.0"
+
+filesystem:
+  read_paths:
+    - "${USERPROFILE}/Documents"
+    - "${USERPROFILE}/Desktop"
+    - "${USERPROFILE}/Downloads"
+  write_paths:
+    - "${USERPROFILE}/Documents/Aether"
+    - "${USERPROFILE}/Desktop"
+  forbidden_paths:
+    - "C:/Windows"
+    - "C:/Program Files"
+    - "C:/Program Files (x86)"
+    - "${USERPROFILE}/AppData/Roaming"
+  max_file_size_mb: 50
+  allow_hidden_files: false
+
+applications:
+  allowed_launch:
+    - "notepad.exe"
+    - "calc.exe"
+    - "explorer.exe"
+    - "chrome.exe"
+    - "msedge.exe"
+    - "code.exe"
+  forbidden_launch:
+    - "cmd.exe"
+    - "powershell.exe"
+    - "wscript.exe"
+    - "cscript.exe"
+    - "regedit.exe"
+
+network:
+  browser_automation_enabled: true
+  blocked_domains: []
+
+destructive_operations:
+  require_confirmation: true
+  operations:
+    - "file.delete"
+    - "file.move"
+    - "file.overwrite_existing"
+    - "process.terminate"
+
+memory:
+  allow_memory_deletion: true
+  require_confirmation_bulk_delete: true

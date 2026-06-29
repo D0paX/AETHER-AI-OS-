@@ -1,0 +1,79 @@
+version: "1.0.0"
+environment: development
+data_dir: data
+log_dir: logs
+backup_dir: backups
+
+llm:
+  tiers:
+    local: "ollama/phi4-mini"
+    cheap: "gemini/gemini-2.0-flash"
+    standard: "claude-sonnet-4-6"
+    premium: "claude-opus-4-6"
+  request_timeout_seconds: 60
+  max_retries: 3
+  retry_delay_seconds: 1.0
+
+budget:
+  daily_limit_usd: 2.00
+  monthly_limit_usd: 30.00
+  warning_threshold_percent: 0.80
+  on_exceeded: "fallback_local"
+
+memory:
+  embedding_model: "BAAI/bge-large-en-v1.5"
+  embedding_dimension: 1024
+  embedding_device: "cpu"
+  importance_decay_days: 30
+  max_context_tokens: 4096
+  consolidation_min_messages: 5
+
+voice:
+  stt_model: "medium"
+  stt_device: "cuda"
+  stt_compute_type: "float16"
+  tts_model: "kokoro"
+  tts_device: "cpu"
+  tts_voice: "af_sarah"
+  wake_word: "aether"
+  vad_threshold: 0.5
+  silence_duration_ms: 800
+  service_host: "localhost"
+  service_port: 8001
+
+tasks:
+  default_priority: "medium"
+  max_active_tasks: 100
+
+tools:
+  web_search_max_results: 5
+  web_search_timeout_seconds: 10
+
+logging:
+  level: "INFO"
+  json_output: true
+  file_path: "logs/aether.log"
+  max_file_mb: 50
+  backup_count: 5
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  socket_timeout: 5.0
+  max_connections: 20
+
+qdrant:
+  host: "localhost"
+  port: 6333
+  grpc_port: 6334
+  prefer_grpc: true
+
+database:
+  url: "sqlite+aiosqlite:///data/aether.db"
+  echo_sql: false
+  pool_size: 5
+  max_overflow: 10
+
+permissions:
+  config_path: ".aether/permissions.yaml"

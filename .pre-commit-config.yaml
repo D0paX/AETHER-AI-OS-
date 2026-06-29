@@ -1,0 +1,29 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        additional_dependencies: [pydantic>=2.9]
+        args: [--strict]
+
+  - repo: local
+    hooks:
+      - id: import-linter
+        name: Architecture Boundary Check
+        entry: uv run lint-imports
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      - id: forbidden-patterns
+        name: Forbidden Pattern Scan
+        entry: bash -c 'grep -r "DROP TABLE\|TRUNCATE\|rm -rf\|flushall\|drop_all" aether/ services/ migrations/ --include="*.py" && exit 1 || exit 0'
+        language: system
+        pass_filenames: false
