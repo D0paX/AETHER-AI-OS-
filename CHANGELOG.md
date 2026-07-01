@@ -14,6 +14,7 @@
 ### [0.1.0] - Phase 1 Foundation
 
 - **[M1.6]** Task Manager and generic Tool System implemented.
+- **[M1.5]** Memory System (Hybrid vector/keyword search, reranking, and auto-consolidation).
 - **[M1.4]** Core SQLite memory schema and FTS5 indexing with full migrations.
 - **[M1.3]** LLM routing engine with budget constraint mechanisms.
 - **[M1.2]** Type-safe config injection and centralized async event bus.
