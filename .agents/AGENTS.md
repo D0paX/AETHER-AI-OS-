@@ -15,3 +15,6 @@ These rules define how the agent (Antigravity) must maintain the project's livin
   - **End of Day Sign-off:** The very last line of any specific date's log must be exactly:
     `_(End of current log. Subsequent entries will be appended upon the completion of future milestones.)_`
   - **Updates:** When a new day starts, create a new Date block at the bottom of the document and repeat the process. Update this file whenever the user verifies that a change or milestone is complete.
+
+## 3. Coding Phase (Phase 4) LLM Configuration
+- **Rule:** Whenever we reach the Coding Phase (Phase 4) and implement the specialized coding agent, the designated local LLM for code generation must be **`nemotron-3-ultra`** via Ollama (https://ollama.com/library/nemotron-3-ultra). Do not substitute this model for the coding agent.

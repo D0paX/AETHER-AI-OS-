@@ -1,17 +1,51 @@
 $ErrorActionPreference = "Stop"
-$originalPath = Get-Location
+
+function Test-RedisHealth {
+    Write-Host "Waiting for Redis to be ready..."
+    $attempts = 0
+    while ($attempts -lt 15) {
+        try {
+            $pong = docker compose exec -T redis redis-cli ping 2>&1
+            if ($pong -match "PONG") {
+                return
+            }
+        }
+        catch {
+            # Ignore and wait
+        }
+        Start-Sleep -Seconds 2
+        $attempts++
+    }
+    Write-Host "Error: Redis failed to become ready within 30 seconds." -ForegroundColor Red
+    exit 1
+}
+
+function Test-QdrantHealth {
+    Write-Host "Waiting for Qdrant to be ready..."
+    $attempts = 0
+    while ($attempts -lt 15) {
+        try {
+            $response = Invoke-WebRequest -Uri "http://localhost:6333/readyz" -UseBasicParsing -ErrorAction SilentlyContinue
+            if ($response.StatusCode -eq 200) {
+                return
+            }
+        }
+        catch {
+            # Ignore and wait
+        }
+        Start-Sleep -Seconds 2
+        $attempts++
+    }
+    Write-Host "Error: Qdrant failed to become ready within 30 seconds." -ForegroundColor Red
+    exit 1
+}
 
 function Start-AetherInfrastructure {
-    try {
-        $null = docker info 2>&1
-    } catch {
-        Set-Location $originalPath
-        Write-Host "Error: Docker Desktop is not running. Please start Docker and try again." -ForegroundColor Red
-        exit 1
-    }
+    $originalPath = Get-Location
 
-    if ($LASTEXITCODE -ne 0) {
-        Set-Location $originalPath
+    try {
+        docker info | Out-Null
+    } catch {
         Write-Host "Error: Docker Desktop is not running. Please start Docker and try again." -ForegroundColor Red
         exit 1
     }
@@ -23,8 +57,8 @@ function Start-AetherInfrastructure {
     try {
         docker compose up -d
     } catch {
-        Set-Location $originalPath
         Write-Host "Error starting containers: $_" -ForegroundColor Red
+        Set-Location $originalPath
         exit 1
     }
 
@@ -41,48 +75,8 @@ function Start-AetherInfrastructure {
     Write-Host "`nRedis: READY at localhost:6379" -ForegroundColor Green
     Write-Host "Qdrant: READY at localhost:6333 (gRPC: 6334)" -ForegroundColor Green
     Write-Host "Aether infrastructure started successfully." -ForegroundColor Green
+    
     Set-Location $originalPath
-    exit 0
-}
-
-function Test-RedisHealth {
-    Write-Host "Waiting for Redis to be ready..."
-    $attempts = 0
-    while ($attempts -lt 15) {
-        try {
-            $pong = docker compose exec -T redis redis-cli ping 2>&1
-            if ($pong -match "PONG") {
-                return
-            }
-        } catch {
-            # Ignore and wait
-        }
-        Start-Sleep -Seconds 2
-        $attempts++
-    }
-    Write-Host "Error: Redis failed to become ready within 30 seconds." -ForegroundColor Red
-    Set-Location $originalPath
-    exit 1
-}
-
-function Test-QdrantHealth {
-    Write-Host "Waiting for Qdrant to be ready..."
-    $attempts = 0
-    while ($attempts -lt 15) {
-        try {
-            $response = Invoke-WebRequest -Uri "http://localhost:6333/readyz" -UseBasicParsing -ErrorAction SilentlyContinue
-            if ($response.StatusCode -eq 200) {
-                return
-            }
-        } catch {
-            # Ignore and wait
-        }
-        Start-Sleep -Seconds 2
-        $attempts++
-    }
-    Write-Host "Error: Qdrant failed to become ready within 30 seconds." -ForegroundColor Red
-    Set-Location $originalPath
-    exit 1
 }
 
 Start-AetherInfrastructure

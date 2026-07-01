@@ -1,8 +1,17 @@
-"""Alembic migration environment. Implemented in M1.4."""
+"""Alembic migration environment for Aether OS.
 
+This configures the migration environment for the Phase 1 SQLite schema using an
+asynchronous SQLAlchemy engine (aiosqlite).
+"""
+
+import asyncio
 from logging.config import fileConfig
 
 from alembic import context
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from aether.core.config import get_config
+from aether.memory.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -15,14 +24,17 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
+
+
+def get_url() -> str:
+    """Retrieve the database URL from AetherConfig dynamically."""
+    return get_config().database.url
 
 
 def run_migrations_offline() -> None:
@@ -35,16 +47,47 @@ def run_migrations_offline() -> None:
 
     Calls to context.execute() here emit the given string to the
     script output.
-
     """
-    raise NotImplementedError("Implemented in M1.4 — SQLite Schema")
+    url = get_url()
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
 
 
-def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
+def do_run_migrations(connection) -> None:
+    """Synchronous core for running online migrations."""
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+    )
 
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
+    with context.begin_transaction():
+        context.run_migrations()
 
-    """
-    raise NotImplementedError("Implemented in M1.4 — SQLite Schema")
+
+async def run_migrations_online() -> None:
+    """Run migrations in 'online' mode using an async engine."""
+    url = get_url()
+    connectable = create_async_engine(url)
+
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
+
+    await connectable.dispose()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    # If a synchronous connection was passed (e.g. via tests using run_sync), use it directly.
+    connectable = config.attributes.get("connection", None)
+    if connectable is not None:
+        do_run_migrations(connectable)
+    else:
+        asyncio.run(run_migrations_online())

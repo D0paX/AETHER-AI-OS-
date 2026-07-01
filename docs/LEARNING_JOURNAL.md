@@ -58,6 +58,12 @@ Now that our rules are set, we need places to store our data. Aether needs a **V
 - **Future Risk:** If we left it broken, the OS would constantly think Qdrant was dead and might refuse to save any AI memories.
 - **The Fix:** Instead of trying to force `curl` inside the container (which would require us to build a custom Docker image), we changed our PowerShell scripts to check the new `/readyz` address from _outside_ the container using Windows commands. This keeps the setup simple and perfectly healthy.
 
+### 🐛 Problem Encountered & Fixed: `start.ps1` Syntax Error
+
+- **The Problem:** The `start.ps1` script (which starts our database containers) failed to run and threw an error: *"The Try statement is missing its Catch or Finally block."*
+- **Why it failed:** The script file got accidentally corrupted (likely from a copy-paste error). A "try" block was left open without telling the computer what to do if it failed (the "catch" block), and some code was duplicated at the bottom of the file.
+- **The Fix:** We completely rebuilt the script file. We properly organized the code into clean functions and correctly paired every `try` command with its matching `catch` command so errors are handled gracefully.
+
 ---
 
 ## Milestone 1.2 (M1.2): Configuration, Logging, and Events
@@ -77,3 +83,85 @@ By locking down these three systems right now, we ensure that every future modul
 ---
 
 *This document will be updated after we complete the next milestone: M1.3 (LLM Router).*
+
+## Milestone 1.3 (M1.3): LLM Router & Budget Manager
+
+*Status: Complete*
+
+We want Aether to be smart, but we also don't want it to accidentally spend hundreds of dollars if it gets confused and talks to itself all night! We built the LLM Router and Budget Manager to solve this.
+
+### What we did:
+1. **The LLM Router (The Switchboard)**: We created a smart router that takes a request from the AI and automatically sends it to the best AI model. It has four "Tiers":
+   - **Local Tier**: Free, runs on your PC (Ollama).
+   - **Cheap Tier**: Extremely fast and low-cost (Gemini Flash).
+   - **Standard Tier**: Smart but reasonably priced (Claude Sonnet).
+   - **Premium Tier**: The smartest, most expensive model (Claude Opus).
+2. **The Budget Manager (The Accountant)**: Before the Router sends a request, it asks the Accountant if we have enough money left in our daily or monthly budget. 
+3. **The Fail-Safe (Fallback Chain)**: If we hit our budget limit, or if the internet goes down, the Router will silently downgrade the request to the Local Tier. This ensures the OS keeps working (for free!) even when things break.
+4. **Local Embeddings (The Translator)**: We added a fast, free local system that translates text into numbers (vectors) so the AI can store them in Qdrant later.
+
+### 💡 Why we chose this approach:
+By putting all AI models behind a single Router, the rest of the OS never needs to worry about which model to use or how much it costs. The Router handles all the complexity, retries, and budgeting automatically.
+
+---
+
+## Milestone 1.4 (M1.4): Memory Database & Search
+
+*Status: Complete*
+
+Aether needs a long-term, organized filing cabinet to remember conversations, tasks, and system settings. We built this filing cabinet using SQLite, an ultra-fast database that runs completely locally.
+
+### What we did:
+1. **The Tables (The Filing System):** We created 8 specific "tables" (like spreadsheets) to store data: Configurations, Conversations, Messages, Memories, Tasks, Tool Executions, Agent Runs, and Cost tracking.
+2. **UUIDv7 Identifiers:** Instead of standard numbers (1, 2, 3), we use a special ID system (UUIDv7) that allows the computer to perfectly sort everything by exactly *when* it happened down to the millisecond.
+3. **Full-Text Search (FTS5):** We created "Virtual Tables" for Memories and Tasks. Think of this as a super-powered search engine built right into the filing cabinet. It allows Aether to instantly search through millions of words to find specific memories without slowing down.
+4. **Automated Triggers (The Invisible Helpers):** We wrote invisible database rules (Triggers) so that whenever Aether creates or deletes a memory, the Full-Text Search index is updated completely automatically in the background.
+
+### 💡 Why we chose this approach:
+By using SQLite locally instead of an external cloud database, we guarantee that all your private conversations and memories never leave your machine. The automated triggers mean the OS can run lightning-fast searches without any extra code slowing down the main program.
+
+*This document will be updated after we complete the next milestone: M1.5 (Memory System).*
+
+---
+
+## Milestone 1.5 (M1.5): Memory System
+
+*Status: Complete*
+
+Aether now has a fully functioning brain! While the previous milestone gave us the empty filing cabinets (SQLite), this milestone gave Aether the ability to automatically read, write, and search those cabinets using both exact keywords and "vibes" (semantic search).
+
+### What we did:
+1. **The Public Interface (`MemoryAPI`):** We built a single, clean doorway into the memory system. The rest of the OS only ever talks to this doorway to `remember`, `recall`, or `forget` things, keeping everything organized.
+2. **Hybrid Search (The Best of Both Worlds):** When Aether tries to remember something, it searches two ways at the same time:
+   - **Vector Search (Qdrant):** It searches for things that *mean* the same thing, even if the exact words are different (e.g. searching for "dog" might find "puppy").
+   - **Keyword Search (SQLite FTS5):** It searches for the exact words you typed.
+   We merged both of these results together so Aether never misses a memory.
+3. **The Reranker (The Judge):** Not all memories are equal. We wrote a mathematical formula that looks at all the memories Aether found and scores them based on three things:
+   - **Similarity:** How closely does it match what we are looking for? (60% weight)
+   - **Recency:** How new is the memory? Older memories slowly lose score over 30 days. (30% weight)
+   - **Importance:** How critical is this information? (10% weight)
+4. **Automated Consolidation (Sleep Cycles):** At the end of a conversation, Aether runs a "consolidation pipeline." It uses a fast, free local LLM to read the entire chat, summarize what happened, extract key facts (like "User likes coffee"), and store them permanently for the future.
+
+### 💡 Why we chose this approach:
+Human memory isn't perfect, but AI memory can be. By forcing the OS to mathematically decay old memories and rank things by importance, we ensure that Aether's brain doesn't get cluttered with useless information over time. The hybrid search guarantees that whether you ask a vague question or a specific one, Aether will find the right answer.
+
+---
+
+## Milestone 1.6 (M1.6): Tool System & Task Manager
+
+*Status: Complete*
+
+Aether can now actually *do* things! Instead of just talking and remembering, Aether now has "hands" (Tools) and a "to-do list" (Task Manager) to interact with the world and manage its own long-running jobs.
+
+### What we did:
+1. **The Tool Box (`ToolRegistry`):** We created a standardized way for Aether to use tools. Every tool requires a very specific set of instructions (schemas) so the AI knows exactly how to use it without making mistakes.
+2. **First Tools:** We built a clock (`GetCurrentDatetimeTool`) so Aether knows what time it is, and a web browser (`WebSearchTool`) so Aether can look up real-time information on the internet.
+3. **The To-Do List (`TaskManager`):** When Aether has a big job (like "Write a report"), it can't just do it all at once. We built a Task Manager that tracks these jobs. It forces tasks to follow a strict order: they start as `PENDING`, move to `ACTIVE`, and finish as `COMPLETED`, `FAILED`, or `CANCELLED`.
+4. **The Pager System (Events):** Every time a task changes state (e.g., from active to completed), the Task Manager shouts it out on the central Event Bus. This means the rest of the OS instantly knows when a job is done without having to constantly check.
+
+### 💡 Why we chose this approach:
+By strictly enforcing how tools are built and how tasks transition from one state to another, we prevent the AI from "hallucinating" tool usage or getting stuck in infinite loops. If a task fails or the AI tries to use a tool incorrectly, the system cleanly catches the error instead of crashing.
+
+---
+
+*This document will be updated after we complete the next milestone: M1.7 (Agent Runtime + Conversation Agent).*

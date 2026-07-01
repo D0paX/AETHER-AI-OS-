@@ -48,6 +48,8 @@ class MemoryConfig(BaseModel):
     """Configuration for the vector and episodic memory systems."""
 
     enabled: bool = True
+    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_device: str = "cpu"
 
 
 class VoiceConfig(BaseModel):

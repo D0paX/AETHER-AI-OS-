@@ -11,6 +11,13 @@
 - CI workflows: lint, format, type-check, architecture, security, unit-tests
 - Alembic migration infrastructure (stub)
 
+### [0.1.0] - Phase 1 Foundation
+
+- **[M1.6]** Task Manager and generic Tool System implemented.
+- **[M1.4]** Core SQLite memory schema and FTS5 indexing with full migrations.
+- **[M1.3]** LLM routing engine with budget constraint mechanisms.
+- **[M1.2]** Type-safe config injection and centralized async event bus.
+
 ## v0.1.0-m1.1 — 2026-06-29
 
 ### Added

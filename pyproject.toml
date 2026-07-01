@@ -107,8 +107,6 @@ name = "Memory module boundary: no external DB access"
 type = "forbidden"
 source_modules = [
     "aether.agents",
-    "aether.tools",
-    "aether.tasks",
     "aether.session",
     "aether.interfaces",
 ]

@@ -14,14 +14,15 @@ See docs/architecture/ for all governing documents.
 See docs/environments/windows-setup.md (created in M0).
 
 ## Milestone Status
-- [x] M0: Environment Validation (script created — run manually)
-- [x] M1.0: Repository Foundation (tooling active)
-- [x] M1.1: Docker Infrastructure
-- [x] M1.2: Configuration + Logging + Events
-- [ ] M1.3: LLM Router + Budget
-- [ ] M1.4: SQLite Schema
-- [ ] M1.5: Memory System
-- [ ] M1.6: Tool System + Task Manager
+### Phase 1: Core Systems (M1)
+
+- [x] **M1.0**: Project Scaffold & Docker Compose
+- [x] **M1.1**: Vector (Qdrant) & Cache (Redis) integration
+- [x] **M1.2**: Type-safe Config (pydantic) & Logging (structlog)
+- [x] **M1.3**: LLM Router (LiteLLM) & Budget Manager
+- [x] **M1.4**: Memory DB Schema (SQLite + SQLAlchemy + Alembic)
+- [ ] **M1.5**: REST API Foundation (FastAPI)
+- [x] **M1.6**: Tool System + Task Manager
 - [ ] M1.7: Agent Runtime + Conversation Agent
 - [ ] M1.8: Session Manager
 - [ ] M1.9: CLI Interface

@@ -1,1 +1,19 @@
-"""Memory system — the sole interface for all memory operations in Aether."""
+from .api import MemoryAPI
+from .models import (
+    ConsolidationReport,
+    ContextPackage,
+    MemoryFilter,
+    MemoryRecord,
+    MemorySource,
+    MemoryType,
+)
+
+__all__ = [
+    "MemoryAPI",
+    "MemoryType",
+    "MemorySource",
+    "MemoryFilter",
+    "MemoryRecord",
+    "ContextPackage",
+    "ConsolidationReport",
+]
