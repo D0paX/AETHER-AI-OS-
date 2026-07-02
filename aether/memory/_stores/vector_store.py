@@ -12,10 +12,10 @@ COLLECTION_NAME = "episodic_memory"
 class QdrantMemoryStore:
     """Internal Qdrant vector storage for semantic memory search."""
 
-    def __init__(self, host: str, port: int, grpc_port: int, prefer_grpc: bool = True):
+    def __init__(self, host: str, port: int, grpc_port: int, prefer_grpc: bool = True, timeout: int | None = 10.0):
         try:
             self._client = AsyncQdrantClient(
-                host=host, port=port, grpc_port=grpc_port, prefer_grpc=prefer_grpc, timeout=10.0
+                host=host, port=port, grpc_port=grpc_port, prefer_grpc=prefer_grpc, timeout=timeout
             )
         except Exception as e:
             raise InfrastructureError(f"Failed to connect to Qdrant: {e}")

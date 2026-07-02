@@ -1,1 +1,4 @@
-"""User-facing interface adapters — CLI and internal FastAPI server."""
+from .api import app
+from .cli import AetherCLI
+
+__all__ = ["app", "AetherCLI"]

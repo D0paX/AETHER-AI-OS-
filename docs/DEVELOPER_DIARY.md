@@ -148,5 +148,54 @@ Implemented the dynamic Tool Registry and state-machine driven Task Manager, ena
 
 _Outcome:_ The OS now possesses a robust, observable engine for defining, executing, and tracking asynchronous agent tasks and external tool interactions.
 
-_(End of current log. Subsequent entries will be appended upon the completion of future milestones.)_
+---
 
+### **Date:** 2026-07-01 07:45 AM
+
+**Milestone:** M1.7 (Agent Runtime + Conversation Agent)
+
+**Engineering Notes:**
+Implemented the Agent Runtime supervisor and the first concrete agent implementation (ConversationAgent), establishing the multi-turn conversational loop with tool-calling capabilities.
+
+- **Models (`models.py`):** Defined `AgentTask`, `AgentContext`, and `AgentResult` Pydantic models. Hardened `AgentResult` to strictly require structured outcomes (`success`, `response`, `actions_taken`, etc.), ensuring the rest of the OS can deterministically parse agent outputs.
+- **Base Agent Contract (`base.py`):** Built `BaseAgent`, forcing all future agents to define `name`, `role`, `llm_tier`, and `allowed_tools`. This rigidly prevents developers from building opaque or un-routable agents.
+- **Conversation Agent (`conversation.py`):** Engineered the state-machine logic for `ConversationAgent`. It dynamically builds a system prompt injected with the user's `task`, the retrieved `memory_context` (fused episodic & semantic data), and available JSON-Schema tools.
+- **Agent Runtime (`runtime.py`):** Designed the `AgentRuntime` supervisor. It handles the iterative `execute()` loop, feeding tool calls (e.g., `get_current_datetime`) back into the LLM until the LLM explicitly resolves the task or breaches `max_iterations`.
+- **Testing & Tool Integration:** Encountered and resolved a critical mock-await issue with the hybrid memory retrieval (`TypeError: 'MagicMock' object can't be awaited`) in `test_conversation_flow.py` by ensuring proper `AsyncMock` behavior on the SQLite FTS retrieval mock.
+
+_Outcome:_ The Aether OS can now hold intelligent, memory-aware, multi-turn conversations and autonomously interact with its local environment via tools.
+
+---
+
+### **Date:** 2026-07-02 01:16 AM
+
+**Milestone:** M1.8 (Session Manager + Morning Briefing)
+
+**Engineering Notes:**
+Implemented the high-level `SessionManager` responsible for orchestrating context assembly, memory consolidation, and LLM-driven morning briefings.
+
+- **Models (`session/models.py`):** Defined `ContextPackage`, `SessionContext`, and `SessionMode` to tightly type all state variables injected into the agent runtime.
+- **Startup Builder (`session/startup.py`):** Built `SessionStartupBuilder` to asynchronously assemble active task queues and semantically relevant memories into the briefing context.
+- **Session Lifecycle (`session/manager.py`):** 
+  - `start_session`: Persists new SQLite tracking entries, compiles morning briefings, and securely caches full interaction state via Redis.
+  - `end_session`: Non-blocking exit orchestrator that emits the `session.lifecycle.ended` event and triggers the async background execution of `ConsolidationPipeline` to extract facts from transcript logs.
+- **Testing & Resilience:** Encountered and fixed extensive Pydantic schema validation failures by strictly matching mock JSON fields (`total_tokens`, `model_used`, and missing task schema entries) to the locked core schemas.
+
+_Outcome:_ The Aether OS kernel can now properly bootstrap context-aware agent sessions and safely fold completed sessions into long-term memory without blocking the user.
+
+---
+
+### **Date:** 2026-07-02 07:24 PM
+
+**Milestone:** M1.9 (CLI Interface [TEXT MILESTONE])
+
+**Engineering Notes:**
+Implemented the text-based CLI interface, internal FastAPI server, and application entry point.
+- **API (`interfaces/api.py`):** Built an internal FastAPI REST server bound strictly to localhost (127.0.0.1:8000) that exposes endpoints for conversation, session context, and health checks, with a global structured error handler.
+- **CLI (`interfaces/cli.py`):** Developed a terminal interface using the `rich` library. It features a startup sequence with a Morning Briefing, a main conversational loop with `Aether >` prompts, and handles slash commands (`/tasks`, `/memory`, `/status`, `/help`, `/quit`).
+- **Entry Point (`__main__.py`):** Created the core bootstrap lifecycle executed via `python -m aether`, wiring the `AetherKernel` initialization cleanly with the `AetherCLI`.
+- **Integration Tests (`tests/integration/test_task_workflow.py`):** Wrote tests for task creation, listing, and completion using the agent. Designed them to skip gracefully if the required Redis instance is unavailable.
+
+_Outcome:_ The Aether OS is now fully interactive through a terminal interface. The TEXT MILESTONE has been successfully achieved, proving persistent memory and agent task execution across sessions.
+
+_(End of current log. Subsequent entries will be appended upon the completion of future milestones.)_

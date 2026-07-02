@@ -140,17 +140,17 @@ class TaskManager:
                     f"Invalid transition from {current_status.value} to {new_status.value}"
                 )
 
-            row.status = new_status.value.lower()
+            row.status = new_status.value.lower()  # type: ignore
             now = self._now_iso()
-            row.updated_at = now
+            row.updated_at = now  # type: ignore
 
             if new_status == TaskStatus.COMPLETED:
-                row.completed_at = now
+                row.completed_at = now  # type: ignore
 
             if note:
                 meta = json.loads(str(row.meta)) if row.meta else {}
                 meta["status_note"] = note
-                row.meta = json.dumps(meta)
+                row.meta = json.dumps(meta)  # type: ignore
 
             await session.commit()
             await session.refresh(row)

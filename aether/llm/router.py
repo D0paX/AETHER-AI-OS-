@@ -12,9 +12,8 @@ from aether.core.exceptions import LLMProviderError, LLMTimeoutError
 from aether.core.logging import get_logger
 from aether.llm._embedding import EmbeddingService
 from aether.llm._models import BudgetStatus, Embedding, LLMResponse, Message, ModelTier
-from aether.llm._providers.anthropic_provider import AnthropicProvider
-from aether.llm._providers.google_provider import GoogleProvider
-from aether.llm._providers.ollama_provider import OllamaProvider
+# Providers will be imported dynamically in __init__
+
 from aether.llm.budget import BudgetManager
 
 logger = get_logger("aether.llm.router")
@@ -26,6 +25,10 @@ class LLMRouter:
     def __init__(self) -> None:
         """Initialize the router, providers, budget manager, and embedding service."""
         config = get_config()
+
+        from aether.llm._providers.anthropic_provider import AnthropicProvider
+        from aether.llm._providers.google_provider import GoogleProvider
+        from aether.llm._providers.ollama_provider import OllamaProvider
 
         # Initialize providers
         self._providers = {

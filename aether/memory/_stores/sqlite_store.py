@@ -114,14 +114,14 @@ class SQLiteMemoryStore:
         async with self._session_factory() as session:
             result = await session.execute(query, {"id": memory_id, "importance": importance})
             await session.commit()
-            return result.rowcount > 0
+            return result.rowcount > 0  # type: ignore
 
     async def delete_memory(self, memory_id: str) -> bool:
         query = text("DELETE FROM memories WHERE id = :id")
         async with self._session_factory() as session:
             result = await session.execute(query, {"id": memory_id})
             await session.commit()
-            return result.rowcount > 0
+            return result.rowcount > 0  # type: ignore
 
     async def search_fts(self, query: str, limit: int, filters: MemoryFilter) -> list[MemoryRecord]:
         conditions = ["memories_fts MATCH :query"]
@@ -137,6 +137,12 @@ class SQLiteMemoryStore:
         if filters.source:
             conditions.append("m.source = :source")
             params["source"] = filters.source.value
+        import re
+        # Remove punctuation to avoid FTS5 syntax errors
+        safe_query = re.sub(r'[^\w\s]', '', query).strip()
+        if not safe_query:
+            return []
+        params["query"] = safe_query
 
         conditions.append("m.importance >= :min_imp")
         params["min_imp"] = filters.min_importance

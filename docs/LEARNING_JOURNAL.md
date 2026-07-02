@@ -164,4 +164,58 @@ By strictly enforcing how tools are built and how tasks transition from one stat
 
 ---
 
-*This document will be updated after we complete the next milestone: M1.7 (Agent Runtime + Conversation Agent).*
+## Milestone 1.7 (M1.7): Agent Runtime & Conversation Agent
+
+*Status: Complete*
+
+Aether now has a cohesive "Supervisor" and its first true Agent! While previous milestones gave Aether a brain, memory, and hands, this milestone gives it a **Personality and a Workflow Loop**. It can now think, act, and remember in a continuous cycle.
+
+### What we did:
+1. **The Base Agent Rules:** We created strict rules (`BaseAgent`) that every future agent must follow. They must declare their name, their role, how smart they need to be (LLM Tier), and exactly which tools they are allowed to use.
+2. **The Conversation Agent:** This is Aether's primary persona. When you talk to Aether, this agent takes your message, pulls relevant memories from the Memory System, and decides how to answer. If you ask a question that requires a tool (like "what's the time?"), it knows how to use it!
+3. **The Agent Runtime (The Supervisor):** We built a "Runtime Loop". Think of it as a supervisor that watches the agent. The loop goes like this: 
+   - The agent thinks.
+   - If the agent wants to use a tool, the Supervisor stops the agent, runs the tool for it, and feeds the result back to the agent.
+   - The agent thinks again until it's finally ready to give you the answer.
+4. **Resilient Testing:** We ensured that the agents can recall your past conversations from previous sessions (Cross-Session Memory) and proved that they can parse complex tasks flawlessly.
+
+### 💡 Why we chose this approach:
+By putting a Supervisor (`AgentRuntime`) in charge of the agents, we prevent the AI from running out of control. The AI never actually executes code or tools itself—it merely *requests* that the Supervisor do it. This keeps the OS incredibly secure and ensures that every action is logged, audited, and strictly controlled.
+
+---
+
+## Milestone 1.8 (M1.8): Session Manager & Morning Briefing
+
+*Status: Complete*
+
+Aether now has a sense of time and boundaries! Just like humans wake up, go about their day, and go to sleep, Aether now starts and ends "Sessions". This milestone tied everything together so the AI can gracefully manage its own context.
+
+### What we did:
+1. **The Morning Briefing:** Whenever you start a new conversation, the Session Manager gathers all your active tasks and any highly relevant past memories. It sends them to the LLM to generate an ultra-short (under 50 words) "Morning Briefing". This ensures Aether is instantly caught up on what it was doing previously.
+2. **Context Packaging (`SessionContext`):** We built a strict package that holds the active task queue, the message transcript, and memory results. This package gets injected into the agent's brain before it answers you.
+3. **Graceful Sleep (Background Consolidation):** When you say goodbye and end the session, Aether doesn't make you wait. It instantly says goodbye, but secretly spins up a background task to read the whole chat, extract the important facts, and save them to long-term memory. 
+4. **Redis State Caching:** We hooked up Redis (our fast, short-term memory) so that if the OS crashes unexpectedly, it can instantly recover exactly where you left off.
+
+### 💡 Why we chose this approach:
+We want Aether to feel snappy and responsive. By putting the heavy lifting (memory consolidation) into a non-blocking background task, you never have to wait for the AI to "think" about what happened before closing the program. The Morning Briefing makes sure the AI never forgets what you were working on yesterday.
+
+---
+
+## Milestone 1.9 (M1.9): CLI Interface [TEXT MILESTONE]
+
+*Status: Complete*
+
+We did it! Aether is no longer just a bunch of hidden background processes; it now has a face you can talk to. This milestone represents our first usable, fully conversational version of the OS, known as the "TEXT MILESTONE".
+
+### What we did:
+1. **The Terminal Interface (CLI):** We built a beautiful terminal application (using a tool called `rich`). When you start it up, Aether welcomes you, gives you your morning briefing, and presents a glowing cyan prompt (`Aether >`) waiting for your input.
+2. **Slash Commands:** We gave you direct control over the OS with simple commands like `/tasks` to see your to-do list, `/memory` to search through past thoughts, and `/status` to check the budget.
+3. **The Internal API:** We built a local web server (FastAPI) that acts as a secure bridge. Even though we are typing in the terminal right now, this API means that in the future, we can easily connect a Voice service or a web dashboard without rewriting the brain of the AI. 
+4. **The Entry Point:** We created the main `python -m aether` start command, which cleanly boots up the entire Aether Kernel, connects all the databases, and launches the chat interface in one go.
+
+### 💡 Why we chose this approach:
+We intentionally kept the CLI simple and strictly separated the terminal screen from the actual "brain" (the Kernel). The CLI contains zero business logic—it simply takes your text and passes it to the OS. This means if we ever want to build a completely new interface (like a mobile app), the core OS doesn't have to change at all.
+
+---
+
+*This document will be updated after we complete the next milestone: M1.10 (Voice Service).*

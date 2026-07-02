@@ -83,7 +83,7 @@ class MemoryAPI:
 
         # 4. Emit event
         if self._event_bus:
-            await self._event_bus.publish(
+            await self._event_bus.emit(
                 "memory.store.created", {"memory_id": memory_id, "type": memory_type.value}
             )
 
@@ -125,7 +125,7 @@ class MemoryAPI:
         await self._vector_store.delete(memory_id)
 
         if self._event_bus:
-            await self._event_bus.publish(
+            await self._event_bus.emit(
                 "memory.store.deleted", {"memory_id": memory_id, "reason": reason}
             )
 

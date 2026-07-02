@@ -11,9 +11,10 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import Column, Float, ForeignKey, Integer, String, Text, text
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import DeclarativeBase
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
 
 # Standard SQLite UTC timestamp generation
 UTC_NOW = text("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')")

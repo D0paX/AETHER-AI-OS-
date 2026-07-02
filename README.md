@@ -21,10 +21,10 @@ See docs/environments/windows-setup.md (created in M0).
 - [x] **M1.2**: Type-safe Config (pydantic) & Logging (structlog)
 - [x] **M1.3**: LLM Router (LiteLLM) & Budget Manager
 - [x] **M1.4**: Memory DB Schema (SQLite + SQLAlchemy + Alembic)
-- [ ] **M1.5**: REST API Foundation (FastAPI)
+- [x] **M1.5**: REST API Foundation (FastAPI) / Memory System
 - [x] **M1.6**: Tool System + Task Manager
-- [ ] M1.7: Agent Runtime + Conversation Agent
-- [ ] M1.8: Session Manager
-- [ ] M1.9: CLI Interface
+- [x] **M1.7**: Agent Runtime + Conversation Agent
+- [x] **M1.8**: Session Manager
+- [x] **M1.9**: CLI Interface **[TEXT MILESTONE ACHIEVED]**
 - [ ] M1.10: Voice Service
 - [ ] M1.11: Backup + Architecture Validation

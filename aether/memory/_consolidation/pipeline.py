@@ -17,7 +17,7 @@ logger = structlog.get_logger(__name__)
 class ConsolidationPipeline:
     """Orchestrates memory consolidation at the end of a session."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._extractor = FactExtractor()
 
     async def run(
@@ -25,7 +25,7 @@ class ConsolidationPipeline:
     ) -> ConsolidationReport:
         start_time = time.perf_counter()
 
-        messages = await memory_api._sqlite_store.get_messages(session_id)
+        messages = await memory_api._sqlite_store.get_messages(session_id)  # type: ignore
 
         # Min messages check (assumed 10)
         if len(messages) < 10:
@@ -85,7 +85,7 @@ class ConsolidationPipeline:
 
         # Event emission via the LLM router's event bus since it's connected
         if hasattr(llm_router, "_event_bus") and llm_router._event_bus:
-            await llm_router._event_bus.publish(
+            await memory_api._event_bus.emit(
                 "memory.consolidation.completed", {"session_id": session_id, "facts": len(facts)}
             )
 
