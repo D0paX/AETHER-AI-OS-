@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from ...core.config import get_config
 from ...llm._models import Message, ModelTier
 from ...llm.router import LLMRouter
 from ..models import ConsolidationReport, MemorySource, MemoryType
@@ -25,10 +26,10 @@ class ConsolidationPipeline:
     ) -> ConsolidationReport:
         start_time = time.perf_counter()
 
-        messages = await memory_api._sqlite_store.get_messages(session_id)  # type: ignore
+        messages = await memory_api.get_conversation_messages(session_id)
 
-        # Min messages check (assumed 10)
-        if len(messages) < 10:
+        min_messages = get_config().memory.consolidation_min_messages
+        if len(messages) < min_messages:
             return ConsolidationReport(
                 session_id=session_id,
                 memories_created=0,
@@ -39,7 +40,7 @@ class ConsolidationPipeline:
                 skip_reason="insufficient_messages",
             )
 
-        transcript = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
+        transcript = "\n".join([f"{m.role}: {m.content}" for m in messages])
         summary_prompt = "Summarize the following conversation concisely."
         msgs = [
             Message(role="system", content=summary_prompt),
