@@ -16,6 +16,10 @@ async def test_cross_session_memory_persistence():
     """
     # Step 1: Initialize MemoryAPI
     router1 = LLMRouter()
+    # The kernel connects the shared EventBus in production; MemoryAPI.remember()
+    # emits through it, so the test must connect it too (M2.1 test-setup fix —
+    # backend-independent; the same failure occurs on SQLite).
+    await router1._event_bus.connect()
     memory1 = MemoryAPI(router1)
     await memory1.initialize()
 
@@ -32,8 +36,11 @@ async def test_cross_session_memory_persistence():
     if hasattr(memory1._vector_store._client, "close"):
         await memory1._vector_store._client.close()
 
+    await router1._event_bus.disconnect()
+
     # Re-initialize
     router2 = LLMRouter()
+    await router2._event_bus.connect()
     memory2 = MemoryAPI(router2)
     # Don't strictly need to call initialize() again if collection exists, but we can
     await memory2.initialize()
@@ -44,6 +51,8 @@ async def test_cross_session_memory_persistence():
     # Step 6: Assert
     assert unique_name in result.formatted_context
 
+    await router2._event_bus.disconnect()
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -52,10 +61,13 @@ async def test_consolidation_creates_long_term_memories():
     memory = MemoryAPI(router)
     await memory.initialize()
 
-    session_id = str(uuid_utils.uuid7())
+    # Messages must reference a real conversation: PostgreSQL enforces the
+    # messages.conversation_id foreign key that SQLite (with FK pragmas off)
+    # silently ignored. Use the created conversation's id as the session id
+    # (M2.1 test fix — the original discarded it and inserted orphaned rows).
+    session_id = await memory._sqlite_store.create_conversation("text")
 
     # Insert 10 messages
-    await memory._sqlite_store.create_conversation("text")
     for i in range(10):
         await memory._sqlite_store.add_message(session_id, "user", f"Message {i}")
 

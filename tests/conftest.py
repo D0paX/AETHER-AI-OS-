@@ -4,6 +4,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+# M2.1.7 database-safety guard. Importing the session-scoped autouse fixture
+# here registers it for the entire suite so it runs before any test body and
+# cannot be opted out of. It redirects config.database.url to the dedicated
+# test database (failing closed if that URL is not clearly test-marked), making
+# the production database unreachable through config for the whole session.
+from conftest_db_guard import _db_safety_guard  # noqa: F401,E402
+
 from aether.core.events import EventBus
 
 

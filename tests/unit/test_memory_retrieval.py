@@ -9,9 +9,9 @@ from aether.memory._retrieval.reranker import MemoryReranker
 from aether.memory.models import MemoryFilter, MemoryRecord, MemorySource, MemoryType
 
 
-def create_mock_record(id: str, content: str, created_at: datetime, importance: float = 0.5):
+def create_mock_record(memory_id: str, content: str, created_at: datetime, importance: float = 0.5):
     return MemoryRecord(
-        id=id,
+        id=memory_id,
         content=content,
         memory_type=MemoryType.FACT,
         importance=importance,

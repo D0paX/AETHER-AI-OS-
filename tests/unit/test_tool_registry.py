@@ -21,7 +21,9 @@ class DummyTool(BaseTool):
     output_schema = DummyOutput
     required_permissions = []
 
-    async def execute(self, input: DummyInput) -> ToolResult:
+    # `input` mirrors the locked BaseTool.execute signature (which carries the
+    # same suppression); renaming it here would break the override contract.
+    async def execute(self, input: DummyInput) -> ToolResult:  # noqa: A002
         return ToolResult(success=True, data={"result": "ok"})
 
 
