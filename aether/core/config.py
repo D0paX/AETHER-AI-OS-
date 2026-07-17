@@ -50,6 +50,12 @@ class MemoryConfig(BaseModel):
     enabled: bool = True
     embedding_model: str = "all-MiniLM-L6-v2"
     embedding_device: str = "cpu"
+    # Minimum messages a conversation needs before end-of-session consolidation
+    # runs (V1_TECHNICAL_SPECIFICATION.md Section 2.1; value set in default.yaml).
+    # M2.1.8: lowered 5 -> 3 so ordinary short exchanges still consolidate. Kept
+    # in sync with default.yaml so the two never drift (unlike the original
+    # 5-vs-10 mismatch fixed in M2.1.5).
+    consolidation_min_messages: int = 3
 
 
 class VoiceConfig(BaseModel):
@@ -82,6 +88,10 @@ class RedisConfig(BaseModel):
     """Configuration for the Redis event bus and cache."""
 
     url: str = "redis://127.0.0.1:6379/0"
+    # Dedicated test Redis logical database (M2.1.7 Part 2). Must use a
+    # non-zero DB index (production uses index 0). The test-safety guard
+    # refuses to run the suite unless the active Redis DB index is non-zero.
+    test_url: str = "redis://127.0.0.1:6379/1"
 
 
 class QdrantConfig(BaseModel):
@@ -90,12 +100,25 @@ class QdrantConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 6333
     grpc_port: int = 6334
+    # Vector collection name. Configurable (M2.1.7 Part 2) so the test suite
+    # can be redirected to a disposable test collection instead of writing
+    # vectors into the production collection.
+    collection: str = "episodic_memory"
+    # Dedicated test collection — a DIFFERENT collection from `collection`.
+    # The test-safety guard refuses to run unless the active collection is a
+    # clearly test-marked name (never the production "episodic_memory").
+    test_collection: str = "episodic_memory_test"
 
 
 class DatabaseConfig(BaseModel):
-    """Configuration for the SQLite relational database."""
+    """Configuration for the relational database (SQLite in dev, PostgreSQL from M2.1)."""
 
     url: str = "sqlite+aiosqlite:///aether.db"
+    # Dedicated, disposable test database — a DIFFERENT logical database from
+    # `url`, used only by the test suite (M2.1.7). Set in config/local.yaml.
+    # The test-safety guard refuses to run the suite unless the active URL
+    # resolves to a clearly test-marked database.
+    test_url: str = ""
 
 
 class PermissionsConfig(BaseModel):

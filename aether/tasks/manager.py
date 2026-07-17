@@ -184,7 +184,11 @@ class TaskManager:
                     else:
                         setattr(row, key, value)
 
-            row.updated_at = self._now_iso()
+            # TaskModel uses legacy `Column(String)` declarations, so mypy types
+            # the attribute as Column[str] and rejects a plain str assignment.
+            # Migrating the ORM models to 2.0 Mapped[] style is a structural
+            # change beyond M2.1.9's lint/type scope; matches lines 143-148.
+            row.updated_at = self._now_iso()  # type: ignore[assignment]
             await session.commit()
             await session.refresh(row)
             pydantic_task = self._to_pydantic(row)

@@ -26,7 +26,7 @@ memory:
   embedding_device: "cpu"
   importance_decay_days: 30
   max_context_tokens: 4096
-  consolidation_min_messages: 5
+  consolidation_min_messages: 3
 
 voice:
   stt_model: "medium"
