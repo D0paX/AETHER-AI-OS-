@@ -1,9 +1,16 @@
 # Aether AI OS — Changelog
 
+## [0.2.0] - Phase 1 Complete
+
+### Added
+
+- **[M1.11]** Backup & Restore system (`backup.ps1`, `restore.ps1`), architecture auditing, and performance baselining. — 2026-07-03
+
 ## [0.1.0] - Phase 1 Foundation
 
 ### Added
 
+- **[M1.10]** Voice Service [VOICE MILESTONE] (SileroVAD, Porcupine Wake Word, FasterWhisper STT, Kokoro TTS, distinct Python process). — 2026-07-03
 - **[M1.9]** CLI Interface (FastAPI internal server, Rich CLI, TEXT MILESTONE achieved). — 2026-07-02
 - **[M1.8]** Session Manager + Morning Briefing (Context lifecycle, Redis caching, async episodic consolidation). — 2026-07-02
 - **[M1.7]** Agent Runtime + Conversation Agent (State machine, multi-turn conversations, LLM integration) — 2026-07-01
