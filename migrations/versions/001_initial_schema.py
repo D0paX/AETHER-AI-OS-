@@ -1,5 +1,12 @@
 """Initial Phase 1 schema: conversations, messages, memories, tasks, tool_executions,
-agent_runs, llm_costs, system_kv with FTS5 and triggers
+agent_runs, llm_costs, system_kv with FTS5 and triggers.
+
+Dialect-aware since M2.1 (developer-approved amendment): on SQLite this
+migration is behaviorally identical to its original Phase 1 form; on
+PostgreSQL it creates the same tables, indexes, and seed data using
+PostgreSQL-native timestamp defaults and trigger syntax, and no FTS5 objects
+(keyword search on PostgreSQL is provided by pg_trgm in revision
+002_postgres_fts).
 
 Revision ID: 001_initial_schema
 Revises:
@@ -18,6 +25,15 @@ depends_on = None
 
 
 def upgrade() -> None:
+    dialect = op.get_bind().dialect.name
+    # UTC ISO-8601 timestamp default with millisecond precision, per dialect.
+    # Both expressions produce the same "YYYY-MM-DDTHH:MM:SS.mmmZ" text format.
+    utc_now_default = (
+        sa.text("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')")
+        if dialect == "sqlite"
+        else sa.text("to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')")
+    )
+
     # STEP 1: Create base tables
     op.create_table(
         "system_kv",
@@ -26,7 +42,7 @@ def upgrade() -> None:
         sa.Column(
             "updated_at",
             sa.Text(),
-            server_default=sa.text("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"),
+            server_default=utc_now_default,
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("key"),
@@ -38,7 +54,7 @@ def upgrade() -> None:
         sa.Column(
             "started_at",
             sa.Text(),
-            server_default=sa.text("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"),
+            server_default=utc_now_default,
             nullable=False,
         ),
         sa.Column("ended_at", sa.Text(), nullable=True),
@@ -62,13 +78,13 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.Text(),
-            server_default=sa.text("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"),
+            server_default=utc_now_default,
             nullable=False,
         ),
         sa.Column(
             "last_accessed_at",
             sa.Text(),
-            server_default=sa.text("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"),
+            server_default=utc_now_default,
             nullable=False,
         ),
         sa.Column("access_count", sa.Integer(), server_default="0", nullable=False),
@@ -91,13 +107,13 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.Text(),
-            server_default=sa.text("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"),
+            server_default=utc_now_default,
             nullable=False,
         ),
         sa.Column(
             "updated_at",
             sa.Text(),
-            server_default=sa.text("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"),
+            server_default=utc_now_default,
             nullable=False,
         ),
         sa.Column("completed_at", sa.Text(), nullable=True),
@@ -125,7 +141,7 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.Text(),
-            server_default=sa.text("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"),
+            server_default=utc_now_default,
             nullable=False,
         ),
         sa.Column("meta", sa.Text(), server_default="{}", nullable=False),
@@ -146,7 +162,7 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.Text(),
-            server_default=sa.text("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"),
+            server_default=utc_now_default,
             nullable=False,
         ),
         sa.Column("meta", sa.Text(), server_default="{}", nullable=False),
@@ -168,7 +184,7 @@ def upgrade() -> None:
         sa.Column(
             "started_at",
             sa.Text(),
-            server_default=sa.text("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"),
+            server_default=utc_now_default,
             nullable=False,
         ),
         sa.Column("completed_at", sa.Text(), nullable=True),
@@ -191,7 +207,7 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.Text(),
-            server_default=sa.text("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"),
+            server_default=utc_now_default,
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id"),
@@ -225,66 +241,11 @@ def upgrade() -> None:
     for idx_sql in indexes:
         op.execute(idx_sql)
 
-    # STEP 4: Create FTS5 virtual tables and triggers
-    op.execute("""
-        CREATE VIRTUAL TABLE memories_fts USING fts5(
-            content, tags, entities,
-            content='memories', content_rowid='rowid'
-        )
-    """)
-    op.execute("""
-        CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN
-          INSERT INTO memories_fts(rowid, content, tags, entities) 
-          VALUES (new.rowid, new.content, new.tags, new.entities);
-        END;
-    """)
-    op.execute("""
-        CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN
-          INSERT INTO memories_fts(memories_fts, rowid, content, tags, entities) 
-          VALUES('delete', old.rowid, old.content, old.tags, old.entities);
-        END;
-    """)
-    op.execute("""
-        CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
-          INSERT INTO memories_fts(memories_fts, rowid, content, tags, entities) 
-          VALUES('delete', old.rowid, old.content, old.tags, old.entities);
-          INSERT INTO memories_fts(rowid, content, tags, entities) 
-          VALUES (new.rowid, new.content, new.tags, new.entities);
-        END;
-    """)
-
-    op.execute("""
-        CREATE VIRTUAL TABLE tasks_fts USING fts5(
-            title, description,
-            content='tasks', content_rowid='rowid'
-        )
-    """)
-    op.execute("""
-        CREATE TRIGGER tasks_ai AFTER INSERT ON tasks BEGIN
-          INSERT INTO tasks_fts(rowid, title, description) 
-          VALUES (new.rowid, new.title, new.description);
-        END;
-    """)
-    op.execute("""
-        CREATE TRIGGER tasks_ad AFTER DELETE ON tasks BEGIN
-          INSERT INTO tasks_fts(tasks_fts, rowid, title, description) 
-          VALUES('delete', old.rowid, old.title, old.description);
-        END;
-    """)
-    op.execute("""
-        CREATE TRIGGER tasks_au AFTER UPDATE ON tasks BEGIN
-          INSERT INTO tasks_fts(tasks_fts, rowid, title, description) 
-          VALUES('delete', old.rowid, old.title, old.description);
-          INSERT INTO tasks_fts(rowid, title, description) 
-          VALUES (new.rowid, new.title, new.description);
-        END;
-    """)
-
-    op.execute("""
-        CREATE TRIGGER tasks_updated_at AFTER UPDATE ON tasks BEGIN
-          UPDATE tasks SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE rowid = new.rowid;
-        END;
-    """)
+    # STEP 4: Dialect-specific search and trigger objects
+    if dialect == "sqlite":
+        _create_sqlite_fts_and_triggers()
+    else:
+        _create_postgres_triggers()
 
     # STEP 5: Pre-populate system_kv
     op.execute("""
@@ -297,20 +258,113 @@ def upgrade() -> None:
     """)
 
 
+def _create_sqlite_fts_and_triggers() -> None:
+    """SQLite-only FTS5 virtual tables and sync/update triggers (original Phase 1 DDL)."""
+    op.execute("""
+        CREATE VIRTUAL TABLE memories_fts USING fts5(
+            content, tags, entities,
+            content='memories', content_rowid='rowid'
+        )
+    """)
+    op.execute("""
+        CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN
+          INSERT INTO memories_fts(rowid, content, tags, entities)
+          VALUES (new.rowid, new.content, new.tags, new.entities);
+        END;
+    """)
+    op.execute("""
+        CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN
+          INSERT INTO memories_fts(memories_fts, rowid, content, tags, entities)
+          VALUES('delete', old.rowid, old.content, old.tags, old.entities);
+        END;
+    """)
+    op.execute("""
+        CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
+          INSERT INTO memories_fts(memories_fts, rowid, content, tags, entities)
+          VALUES('delete', old.rowid, old.content, old.tags, old.entities);
+          INSERT INTO memories_fts(rowid, content, tags, entities)
+          VALUES (new.rowid, new.content, new.tags, new.entities);
+        END;
+    """)
+
+    op.execute("""
+        CREATE VIRTUAL TABLE tasks_fts USING fts5(
+            title, description,
+            content='tasks', content_rowid='rowid'
+        )
+    """)
+    op.execute("""
+        CREATE TRIGGER tasks_ai AFTER INSERT ON tasks BEGIN
+          INSERT INTO tasks_fts(rowid, title, description)
+          VALUES (new.rowid, new.title, new.description);
+        END;
+    """)
+    op.execute("""
+        CREATE TRIGGER tasks_ad AFTER DELETE ON tasks BEGIN
+          INSERT INTO tasks_fts(tasks_fts, rowid, title, description)
+          VALUES('delete', old.rowid, old.title, old.description);
+        END;
+    """)
+    op.execute("""
+        CREATE TRIGGER tasks_au AFTER UPDATE ON tasks BEGIN
+          INSERT INTO tasks_fts(tasks_fts, rowid, title, description)
+          VALUES('delete', old.rowid, old.title, old.description);
+          INSERT INTO tasks_fts(rowid, title, description)
+          VALUES (new.rowid, new.title, new.description);
+        END;
+    """)
+
+    op.execute("""
+        CREATE TRIGGER tasks_updated_at AFTER UPDATE ON tasks BEGIN
+          UPDATE tasks SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE rowid = new.rowid;
+        END;
+    """)
+
+
+def _create_postgres_triggers() -> None:
+    """PostgreSQL equivalent of the SQLite tasks_updated_at trigger.
+
+    Keeps tasks.updated_at current on every row update, matching the SQLite
+    trigger's observable behavior. FTS5 has no PostgreSQL equivalent; keyword
+    search on PostgreSQL is provided by the pg_trgm GIN indexes created in
+    revision 002_postgres_fts.
+    """
+    op.execute("""
+        CREATE OR REPLACE FUNCTION aether_touch_tasks_updated_at() RETURNS trigger AS $$
+        BEGIN
+          NEW.updated_at := to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+    op.execute("""
+        CREATE TRIGGER tasks_updated_at BEFORE UPDATE ON tasks
+        FOR EACH ROW EXECUTE FUNCTION aether_touch_tasks_updated_at();
+    """)
+
+
 def downgrade() -> None:
-    # Reverse triggers
-    op.execute("DROP TRIGGER IF EXISTS tasks_updated_at")
-    op.execute("DROP TRIGGER IF EXISTS tasks_au")
-    op.execute("DROP TRIGGER IF EXISTS tasks_ad")
-    op.execute("DROP TRIGGER IF EXISTS tasks_ai")
+    dialect = op.get_bind().dialect.name
 
-    op.execute("DROP TRIGGER IF EXISTS memories_au")
-    op.execute("DROP TRIGGER IF EXISTS memories_ad")
-    op.execute("DROP TRIGGER IF EXISTS memories_ai")
+    if dialect == "sqlite":
+        # Reverse triggers
+        op.execute("DROP TRIGGER IF EXISTS tasks_updated_at")
+        op.execute("DROP TRIGGER IF EXISTS tasks_au")
+        op.execute("DROP TRIGGER IF EXISTS tasks_ad")
+        op.execute("DROP TRIGGER IF EXISTS tasks_ai")
 
-    # Drop FTS tables
-    op.execute("DROP TABLE IF EXISTS tasks_fts")
-    op.execute("DROP TABLE IF EXISTS memories_fts")
+        op.execute("DROP TRIGGER IF EXISTS memories_au")
+        op.execute("DROP TRIGGER IF EXISTS memories_ad")
+        op.execute("DROP TRIGGER IF EXISTS memories_ai")
+
+        # Drop FTS tables (SQLite FTS5 shadow tables only — derived search
+        # indexes over memories/tasks with no user data of their own)
+        op.execute("DROP TABLE IF EXISTS tasks_fts")
+        op.execute("DROP TABLE IF EXISTS memories_fts")
+    else:
+        # Reverse the PostgreSQL trigger and function created by upgrade()
+        op.execute("DROP TRIGGER IF EXISTS tasks_updated_at ON tasks")
+        op.execute("DROP FUNCTION IF EXISTS aether_touch_tasks_updated_at")
 
     # Drop child tables
     op.drop_table("llm_costs")

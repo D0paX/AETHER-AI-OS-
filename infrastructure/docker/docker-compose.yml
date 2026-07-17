@@ -38,11 +38,37 @@ services:
     networks:
       - aether-internal
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: aether-postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: aether
+      # Local secret: set AETHER_POSTGRES_PASSWORD in infrastructure/docker/.env
+      # (gitignored). The CHANGE_ME default exists only so a fresh checkout fails
+      # loudly at authentication rather than silently using a known credential.
+      POSTGRES_PASSWORD: ${AETHER_POSTGRES_PASSWORD:-CHANGE_ME}
+      POSTGRES_DB: aether
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aether -d aether"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - aether-internal
+
 volumes:
   redis_data:
     name: aether-redis-data
   qdrant_data:
     name: aether-qdrant-data
+  postgres_data:
+    name: aether-postgres-data
 
 networks:
   aether-internal:

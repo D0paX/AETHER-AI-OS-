@@ -40,6 +40,47 @@ function Test-QdrantHealth {
     exit 1
 }
 
+function Test-PostgresHealth {
+    Write-Host "Waiting for PostgreSQL to be ready..."
+    $attempts = 0
+    while ($attempts -lt 15) {
+        try {
+            $ready = docker compose exec -T postgres pg_isready -U aether -d aether 2>&1
+            if ($ready -match "accepting connections") {
+                return
+            }
+        }
+        catch {
+            # Ignore and wait
+        }
+        Start-Sleep -Seconds 2
+        $attempts++
+    }
+    Write-Host "Error: PostgreSQL failed to become ready within 30 seconds." -ForegroundColor Red
+    exit 1
+}
+
+function Test-ServiceHealth {
+    param([int]$Port, [string]$Name)
+    Write-Host "Waiting for $Name on port $Port to be ready..."
+    $attempts = 0
+    while ($attempts -lt 60) {
+        try {
+            $response = Invoke-WebRequest -Uri "http://localhost:$Port/health" -UseBasicParsing -ErrorAction SilentlyContinue
+            if ($response.StatusCode -eq 200) {
+                Write-Host "$Name is READY" -ForegroundColor Green
+                return
+            }
+        }
+        catch {
+            # Ignore and wait
+        }
+        Start-Sleep -Seconds 2
+        $attempts++
+    }
+    Write-Host "Error: $Name failed to become ready within 120 seconds." -ForegroundColor Red
+}
+
 function Start-AetherInfrastructure {
     $originalPath = Get-Location
 
@@ -64,6 +105,7 @@ function Start-AetherInfrastructure {
 
     Test-RedisHealth
     Test-QdrantHealth
+    Test-PostgresHealth
 
     Write-Host "`nGPU VRAM Status:"
     try {
@@ -74,9 +116,19 @@ function Start-AetherInfrastructure {
 
     Write-Host "`nRedis: READY at localhost:6379" -ForegroundColor Green
     Write-Host "Qdrant: READY at localhost:6333 (gRPC: 6334)" -ForegroundColor Green
-    Write-Host "Aether infrastructure started successfully." -ForegroundColor Green
+    Write-Host "PostgreSQL: READY at localhost:5432" -ForegroundColor Green
     
     Set-Location $originalPath
+
+    Write-Host "`nStarting Aether Services..."
+    # Start core and voice services in the background using uv run
+    Start-Process powershell -ArgumentList "-NoExit -Command `"uv run python -m aether`"" -WindowStyle Hidden
+    Start-Process powershell -ArgumentList "-NoExit -Command `"uv run python -m services.voice.main`"" -WindowStyle Hidden
+
+    Test-ServiceHealth -Port 8000 -Name "Aether Core"
+    Test-ServiceHealth -Port 8001 -Name "Aether Voice"
+
+    Write-Host "Aether infrastructure and services started successfully." -ForegroundColor Green
 }
 
 Start-AetherInfrastructure
