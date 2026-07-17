@@ -25,6 +25,11 @@ function Stop-AetherInfrastructure {
     }
 
     Write-Host "Aether infrastructure stopped. Data preserved in named volumes." -ForegroundColor Green
+
+    Write-Host "`nStopping Aether background services (python/uv)..."
+    Stop-Process -Name "python" -Force -ErrorAction SilentlyContinue
+    Stop-Process -Name "uv" -Force -ErrorAction SilentlyContinue
+
     Write-Host "`nVolume status:"
     docker volume ls --filter name=aether
 

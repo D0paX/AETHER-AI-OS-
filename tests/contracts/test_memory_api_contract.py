@@ -21,7 +21,7 @@ def test_remember_signature_matches_spec():
     assert "metadata" in sig.parameters
     assert "session_id" in sig.parameters
     assert "source" in sig.parameters
-    assert sig.return_annotation == str
+    assert sig.return_annotation is str
 
 
 def test_memory_api_has_recall_method():
@@ -42,7 +42,7 @@ def test_memory_api_has_forget_method():
     sig = inspect.signature(MemoryAPI.forget)
     assert "memory_id" in sig.parameters
     assert "reason" in sig.parameters
-    assert sig.return_annotation == bool
+    assert sig.return_annotation is bool
 
 
 def test_memory_api_has_consolidate_method():

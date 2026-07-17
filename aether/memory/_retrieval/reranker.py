@@ -41,7 +41,7 @@ class MemoryReranker:
         selected_records = []
         current_tokens = 0
 
-        for record, score in scored_candidates:
+        for record, _score in scored_candidates:
             # Token estimate: len(record.content.split()) * 1.3
             token_estimate = int(len(record.content.split()) * 1.3)
             if current_tokens + token_estimate <= token_budget:

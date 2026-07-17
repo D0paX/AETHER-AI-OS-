@@ -710,6 +710,34 @@ class MemoryAPI:
 
     async def get_stats(self) -> MemoryStats:
         """Returns counts by type, total size, oldest/newest memory."""
+
+    # ------------------------------------------------------------------
+    # Conversation accessors — ADDED M2.1.5 (purely additive; the seven
+    # methods above are unchanged). These are the sole public path to
+    # conversation records for callers outside the memory module
+    # (SessionManager, the consolidation pipeline).
+    # ------------------------------------------------------------------
+
+    async def start_conversation(self, mode: str = "voice") -> str:
+        """Creates a conversation record. Returns conversation_id (UUIDv7)."""
+
+    async def record_message(
+        self,
+        conversation_id: str,
+        role: Literal["user", "assistant", "system", "tool"],
+        content: str,
+        token_count: int | None = None,
+    ) -> str:
+        """Persists one message turn. Returns message_id (UUIDv7)."""
+
+    async def end_conversation(self, conversation_id: str) -> None:
+        """Sets ended_at and message_count (computed via COUNT(*) against the
+        messages table — never accepted from the caller)."""
+
+    async def get_conversation_messages(self, conversation_id: str) -> list[Message]:
+        """Returns the transcript as typed aether.llm Message objects, ordered
+        by created_at ascending. The internal store returns raw dicts; the
+        public API returns typed domain objects."""
 ```
 
 **Supporting types (LOCKED):**
@@ -907,6 +935,29 @@ class AgentResult(BaseModel):
 ### 2.8 Session Manager (`aether/session/manager.py`)
 
 **Purpose:** Session lifecycle, working memory, morning briefing, consolidation trigger.
+
+**Constructor (CORRECTED in M2.1.5 — specification error acknowledged):**
+The dependency set this section originally implied — and Phase 1 implemented —
+injected a database session factory and the consolidation pipeline directly
+into SessionManager. That was a specification error: it violated Rule 1 of
+ARCHITECTURE_RULES.md (Section 11), which makes `MemoryAPI` the only door to
+memory and conversation persistence. The corrected, authoritative constructor
+is:
+
+```python
+SessionManager(
+    startup_builder: SessionStartupBuilder,
+    memory_api: MemoryAPI,
+    event_bus: EventBus,
+    redis_client: Redis,
+)
+```
+
+SessionManager holds no `db_session_factory` and no direct
+`ConsolidationPipeline`. Conversation records are managed exclusively through
+`MemoryAPI.start_conversation()` / `.record_message()` / `.end_conversation()`
+/ `.get_conversation_messages()` (Section 2.5), and consolidation is triggered
+through the already-public `MemoryAPI.consolidate()`.
 
 **Session states:**
 ```

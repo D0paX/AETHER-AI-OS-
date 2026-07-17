@@ -13,8 +13,10 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import Column, Float, ForeignKey, Integer, String, Text, text
 from sqlalchemy.orm import DeclarativeBase
 
+
 class Base(DeclarativeBase):
     pass
+
 
 # Standard SQLite UTC timestamp generation
 UTC_NOW = text("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')")
@@ -165,8 +167,14 @@ class LLMCostModel(Base):
 # =============================================================================
 
 
-class MemoryType(str, Enum):
-    """The type of a memory."""
+class MemoryType(str, Enum):  # noqa: UP042
+    """The type of a memory.
+
+    UP042 (convert to StrEnum) is deliberately suppressed — see ModelTier in
+    aether/llm/_models.py: StrEnum would change `str()`/f-string rendering
+    from "MemoryType.FACT" to "FACT", an observable behavior change on a
+    locked Memory API contract.
+    """
 
     FACT = "FACT"
     EPISODE = "EPISODE"
@@ -174,8 +182,11 @@ class MemoryType(str, Enum):
     PREFERENCE = "PREFERENCE"
 
 
-class MemorySource(str, Enum):
-    """The source of a memory."""
+class MemorySource(str, Enum):  # noqa: UP042
+    """The source of a memory.
+
+    UP042 deliberately suppressed for the same reason as MemoryType above.
+    """
 
     CONVERSATION = "CONVERSATION"
     DOCUMENT = "DOCUMENT"

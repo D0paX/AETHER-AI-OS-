@@ -1,8 +1,9 @@
-from typing import Any
+from typing import Any, Literal
 
 import structlog
 
 from aether.core.config import get_config
+from aether.llm import Message
 from aether.llm.router import LLMRouter
 
 from ._consolidation.pipeline import ConsolidationPipeline
@@ -34,6 +35,7 @@ class MemoryAPI:
             port=config.qdrant.port,
             grpc_port=config.qdrant.grpc_port,
             prefer_grpc=True,
+            collection_name=config.qdrant.collection,
         )
 
         self._hybrid = HybridRetrieval(self._sqlite_store, self._vector_store)
@@ -50,7 +52,7 @@ class MemoryAPI:
         content: str,
         memory_type: MemoryType,
         importance: float,
-        metadata: dict[str, Any] = {},
+        metadata: dict[str, Any] = {},  # noqa: B006
         session_id: str | None = None,
         source: MemorySource = MemorySource.CONVERSATION,
     ) -> str:
@@ -93,7 +95,7 @@ class MemoryAPI:
         self,
         query: str,
         k: int = 10,
-        filters: MemoryFilter = MemoryFilter(),  # noqa: B006
+        filters: MemoryFilter = MemoryFilter(),  # noqa: B008
         token_budget: int = 4096,
     ) -> ContextPackage:
         # 1. Generate query embedding
@@ -166,3 +168,76 @@ class MemoryAPI:
             "status": "online",
             # Additional stats can be implemented by querying SQLite
         }
+
+    # ------------------------------------------------------------------
+    # Conversation accessors (added in M2.1.5 — purely additive; the seven
+    # original locked methods above are unchanged). These are the single
+    # public path to conversation records for every caller outside the
+    # memory module, including SessionManager and the consolidation
+    # pipeline.
+    # ------------------------------------------------------------------
+
+    async def start_conversation(self, mode: str = "voice") -> str:
+        """Create a new conversation record.
+
+        Args:
+            mode: Interaction mode ("voice", "text", or "task").
+
+        Returns:
+            The new conversation's id (UUIDv7 string).
+        """
+        return await self._sqlite_store.create_conversation(mode)
+
+    async def record_message(
+        self,
+        conversation_id: str,
+        role: Literal["user", "assistant", "system", "tool"],
+        content: str,
+        token_count: int | None = None,
+    ) -> str:
+        """Persist one message turn of a conversation.
+
+        Args:
+            conversation_id: The conversation the message belongs to.
+            role: The speaker role for the turn.
+            content: The message text.
+            token_count: Optional estimated token count for the turn.
+
+        Returns:
+            The new message's id (UUIDv7 string).
+        """
+        return await self._sqlite_store.add_message(
+            conversation_id=conversation_id,
+            role=role,
+            content=content,
+            token_count=token_count,
+        )
+
+    async def end_conversation(self, conversation_id: str) -> None:
+        """Close a conversation, setting ended_at and its true message count.
+
+        The message count is computed inside the store from the persisted
+        message rows, never supplied by the caller.
+
+        Args:
+            conversation_id: The conversation to close.
+        """
+        await self._sqlite_store.end_conversation(conversation_id)
+
+    async def get_conversation_messages(self, conversation_id: str) -> list[Message]:
+        """Return a conversation's messages as typed Message objects, oldest first.
+
+        The internal store returns raw row dicts; this public method
+        transforms them into the locked aether.llm Message model, keeping
+        typed domain objects at the module boundary.
+
+        Args:
+            conversation_id: The conversation whose transcript to fetch.
+
+        Returns:
+            The conversation's messages ordered by created_at ascending.
+        """
+        rows = await self._sqlite_store.get_messages(conversation_id)
+        return [
+            Message.model_validate({"role": row["role"], "content": row["content"]}) for row in rows
+        ]

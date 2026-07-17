@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import UTC, datetime
 
 import structlog
@@ -12,10 +13,18 @@ logger = structlog.get_logger(__name__)
 
 
 class SQLiteMemoryStore:
-    """Internal SQLite storage for memory metadata and FTS search."""
+    """Internal relational storage for memory metadata and keyword search.
+
+    Since M2.1 the backing database is PostgreSQL in production while SQLite
+    remains the test-suite backend; keyword search dispatches per dialect
+    (pg_trgm word similarity on PostgreSQL, FTS5 MATCH on SQLite). The class
+    name is retained because V1_TECHNICAL_SPECIFICATION.md and the approved
+    Phase 2 plan reference this module by its current path.
+    """
 
     def __init__(self, db_url: str):
         self._engine = create_async_engine(db_url, echo=False)
+        self._dialect_name: str = self._engine.dialect.name
         self._session_factory = async_sessionmaker(
             bind=self._engine, expire_on_commit=False, class_=AsyncSession
         )
@@ -42,8 +51,8 @@ class SQLiteMemoryStore:
 
         query = text("""
             INSERT INTO memories (
-                id, content, memory_type, importance, confidence, 
-                source, source_id, tags, entities, created_at, 
+                id, content, memory_type, importance, confidence,
+                source, source_id, tags, entities, created_at,
                 last_accessed_at, access_count, meta
             ) VALUES (
                 :id, :content, :memory_type, :importance, :confidence,
@@ -101,7 +110,7 @@ class SQLiteMemoryStore:
     async def update_access(self, memory_id: str) -> None:
         now = self._now_iso()
         query = text("""
-            UPDATE memories 
+            UPDATE memories
             SET access_count = access_count + 1, last_accessed_at = :now
             WHERE id = :id
         """)
@@ -124,9 +133,21 @@ class SQLiteMemoryStore:
             return result.rowcount > 0  # type: ignore
 
     async def search_fts(self, query: str, limit: int, filters: MemoryFilter) -> list[MemoryRecord]:
-        conditions = ["memories_fts MATCH :query"]
-        params = {"query": query, "limit": limit}
+        """Keyword search, dispatching to the dialect-appropriate implementation.
 
+        The public signature is locked (same inputs, same MemoryRecord list
+        output). On PostgreSQL the implementation uses pg_trgm word similarity
+        against the GIN indexes from migration 002_postgres_fts; on SQLite
+        (the test-suite backend) it keeps the original Phase 1 FTS5 query.
+        """
+        if self._dialect_name == "postgresql":
+            return await self._search_keyword_trigram(query, limit, filters)
+        return await self._search_keyword_fts5(query, limit, filters)
+
+    def _apply_shared_filters(
+        self, conditions: list[str], params: dict[str, object], filters: MemoryFilter
+    ) -> None:
+        """Append the filter conditions shared by both keyword search dialects."""
         if filters.memory_types:
             placeholders = []
             for i, mt in enumerate(filters.memory_types):
@@ -137,12 +158,6 @@ class SQLiteMemoryStore:
         if filters.source:
             conditions.append("m.source = :source")
             params["source"] = filters.source.value
-        import re
-        # Remove punctuation to avoid FTS5 syntax errors
-        safe_query = re.sub(r'[^\w\s]', '', query).strip()
-        if not safe_query:
-            return []
-        params["query"] = safe_query
 
         conditions.append("m.importance >= :min_imp")
         params["min_imp"] = filters.min_importance
@@ -150,20 +165,82 @@ class SQLiteMemoryStore:
         conditions.append("m.confidence >= :min_conf")
         params["min_conf"] = filters.min_confidence
 
+    async def _search_keyword_fts5(
+        self, query: str, limit: int, filters: MemoryFilter
+    ) -> list[MemoryRecord]:
+        """Original Phase 1 FTS5 keyword search (SQLite only)."""
+        # Remove punctuation to avoid FTS5 syntax errors
+        safe_query = re.sub(r"[^\w\s]", "", query).strip()
+        if not safe_query:
+            return []
+
+        conditions = ["memories_fts MATCH :query"]
+        params: dict[str, object] = {"query": safe_query, "limit": limit}
+        self._apply_shared_filters(conditions, params, filters)
+
+        # Join on the shared INTEGER rowid, not m.id. memories.id is a TEXT
+        # UUIDv7, while memories_fts.rowid is FTS5's integer shadow-row alias;
+        # comparing them can never match (DEBT-004). content_rowid='rowid'
+        # (set in migration 001) means both sides refer to memories.rowid.
         sql = f"""
-            SELECT m.* 
+            SELECT m.*
             FROM memories_fts f
-            JOIN memories m ON m.id = f.rowid
+            JOIN memories m ON m.rowid = f.rowid
             WHERE {" AND ".join(conditions)}
             ORDER BY f.rank
             LIMIT :limit
         """
 
+        return await self._execute_keyword_query(sql, params)
+
+    async def _search_keyword_trigram(
+        self, query: str, limit: int, filters: MemoryFilter
+    ) -> list[MemoryRecord]:
+        """PostgreSQL keyword search via pg_trgm word similarity.
+
+        The <% operator (word_similarity) matches the query against the best
+        matching word span of each column, mirroring FTS5's keyword semantics,
+        and is served by the GIN gin_trgm_ops indexes from migration
+        002_postgres_fts.
+        """
+        # Same query sanitisation as the FTS5 path, for behavioral parity.
+        safe_query = re.sub(r"[^\w\s]", "", query).strip()
+        if not safe_query:
+            return []
+
+        conditions = ["(:query <% m.content OR :query <% m.tags OR :query <% m.entities)"]
+        params: dict[str, object] = {"query": safe_query, "limit": limit}
+        self._apply_shared_filters(conditions, params, filters)
+
+        sql = f"""
+            SELECT m.*,
+                   GREATEST(
+                       word_similarity(:query, m.content),
+                       word_similarity(:query, m.tags),
+                       word_similarity(:query, m.entities)
+                   ) AS keyword_rank
+            FROM memories m
+            WHERE {" AND ".join(conditions)}
+            ORDER BY keyword_rank DESC
+            LIMIT :limit
+        """
+
+        return await self._execute_keyword_query(sql, params)
+
+    async def _execute_keyword_query(
+        self, sql: str, params: dict[str, object]
+    ) -> list[MemoryRecord]:
+        """Run a keyword-search query, preserving the return-empty-on-failure contract.
+
+        HybridRetrieval relies on keyword search degrading to an empty result
+        (with a warning) rather than raising, so vector search can still serve
+        the request when the relational backend is unavailable.
+        """
         async with self._session_factory() as session:
             try:
                 result = await session.execute(text(sql), params)
             except Exception as e:
-                logger.warning("FTS search failed", error=str(e))
+                logger.warning("Keyword search failed", error=str(e))
                 return []
 
             rows = result.mappings().all()
@@ -198,6 +275,57 @@ class SQLiteMemoryStore:
             await session.execute(query, {"id": conv_id, "started_at": now, "mode": mode})
             await session.commit()
         return conv_id
+
+    async def get_messages(self, conversation_id: str) -> list[dict[str, object]]:
+        """Return all messages of a conversation, oldest first.
+
+        Implements the accessor specified in V1_TECHNICAL_SPECIFICATION.md
+        Section 3.2 (previously missing; added in M2.1.5). Each row carries
+        role, content, token_count, and created_at. The id tiebreaker keeps
+        ordering deterministic when created_at timestamps collide at
+        millisecond precision (UUIDv7 ids are time-ordered).
+
+        Args:
+            conversation_id: The conversation whose messages to fetch.
+
+        Returns:
+            A list of raw row dicts ordered by created_at ascending.
+        """
+        query = text("""
+            SELECT role, content, token_count, created_at
+            FROM messages
+            WHERE conversation_id = :conversation_id
+            ORDER BY created_at ASC, id ASC
+        """)
+        async with self._session_factory() as session:
+            result = await session.execute(query, {"conversation_id": conversation_id})
+            return [dict(row) for row in result.mappings().all()]
+
+    async def end_conversation(self, conversation_id: str) -> None:
+        """Mark a conversation as ended and record its true message count.
+
+        message_count is computed with a real COUNT(*) against the messages
+        table — never accepted from a caller, so it cannot drift from the
+        rows that actually exist.
+
+        Args:
+            conversation_id: The conversation to close.
+        """
+        query = text("""
+            UPDATE conversations
+            SET ended_at = :ended_at,
+                message_count = (
+                    SELECT COUNT(*) FROM messages
+                    WHERE conversation_id = :conversation_id
+                )
+            WHERE id = :conversation_id
+        """)
+        async with self._session_factory() as session:
+            await session.execute(
+                query,
+                {"ended_at": self._now_iso(), "conversation_id": conversation_id},
+            )
+            await session.commit()
 
     async def add_message(
         self, conversation_id: str, role: str, content: str, token_count: int | None = None

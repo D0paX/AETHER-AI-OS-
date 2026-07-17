@@ -81,8 +81,10 @@ async def test_remember_returns_uuid_string(memory_api):
 @pytest.mark.asyncio
 async def test_remember_emits_memory_store_created_event(memory_api, mock_llm_router):
     await memory_api.remember("Test memory", MemoryType.FACT, 0.9)
-    mock_llm_router._event_bus.publish.assert_called_once()
-    assert mock_llm_router._event_bus.publish.call_args.args[0] == "memory.store.created"
+    # The locked EventBus method is emit() (V1_TECHNICAL_SPECIFICATION.md
+    # Section 2.3); the original assertion checked a nonexistent publish().
+    mock_llm_router._event_bus.emit.assert_called_once()
+    assert mock_llm_router._event_bus.emit.call_args.args[0] == "memory.store.created"
 
 
 @pytest.mark.asyncio
@@ -169,12 +171,62 @@ async def test_forget_removes_from_qdrant(memory_api, mock_qdrant):
 
 @pytest.mark.asyncio
 async def test_forget_requires_reason_parameter(memory_api):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="reason must be provided"):
         await memory_api.forget("123", "")
 
 
 @pytest.mark.asyncio
 async def test_forget_emits_memory_store_deleted_event(memory_api, mock_llm_router):
     await memory_api.forget("123", "Reason")
-    mock_llm_router._event_bus.publish.assert_called_once()
-    assert mock_llm_router._event_bus.publish.call_args.args[0] == "memory.store.deleted"
+    mock_llm_router._event_bus.emit.assert_called_once()
+    assert mock_llm_router._event_bus.emit.call_args.args[0] == "memory.store.deleted"
+
+
+# ---------------------------------------------------------------------------
+# Conversation accessors (M2.1.5 — four additive public methods)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_start_conversation_delegates_to_store(memory_api, mock_sqlite):
+    mock_sqlite.create_conversation.return_value = "conv-1"
+
+    result = await memory_api.start_conversation("text")
+
+    mock_sqlite.create_conversation.assert_called_once_with("text")
+    assert result == "conv-1"
+
+
+@pytest.mark.asyncio
+async def test_record_message_delegates_to_store(memory_api, mock_sqlite):
+    mock_sqlite.add_message.return_value = "msg-1"
+
+    result = await memory_api.record_message("conv-1", "user", "hello", token_count=7)
+
+    mock_sqlite.add_message.assert_called_once_with(
+        conversation_id="conv-1", role="user", content="hello", token_count=7
+    )
+    assert result == "msg-1"
+
+
+@pytest.mark.asyncio
+async def test_end_conversation_delegates_to_store(memory_api, mock_sqlite):
+    await memory_api.end_conversation("conv-1")
+
+    mock_sqlite.end_conversation.assert_called_once_with("conv-1")
+
+
+@pytest.mark.asyncio
+async def test_get_conversation_messages_returns_typed_message_objects(memory_api, mock_sqlite):
+    from aether.llm import Message
+
+    mock_sqlite.get_messages.return_value = [
+        {"role": "user", "content": "hi", "token_count": None, "created_at": "2026-07-07"},
+        {"role": "assistant", "content": "hello", "token_count": 3, "created_at": "2026-07-07"},
+    ]
+
+    result = await memory_api.get_conversation_messages("conv-1")
+
+    mock_sqlite.get_messages.assert_called_once_with("conv-1")
+    assert all(isinstance(m, Message) for m in result)
+    assert [(m.role, m.content) for m in result] == [("user", "hi"), ("assistant", "hello")]

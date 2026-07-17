@@ -8,8 +8,15 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from aether.core.config import EMBEDDING_DIMENSION
 
 
-class ModelTier(str, Enum):
-    """The locked set of model tiers used for routing."""
+class ModelTier(str, Enum):  # noqa: UP042
+    """The locked set of model tiers used for routing.
+
+    UP042 (convert to StrEnum) is deliberately suppressed: StrEnum changes
+    `str()`/f-string rendering from "ModelTier.LOCAL" to "local", which is an
+    observable behavior change across logging and display, and this is a
+    locked contract (V1_TECHNICAL_SPECIFICATION.md Section 2.4). M2.1.9 is a
+    lint/type pass that must change no behavior.
+    """
 
     LOCAL = "local"
     CHEAP = "cheap"

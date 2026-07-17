@@ -1,19 +1,23 @@
 """Agent runtime orchestrator."""
 
 import asyncio
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
+
 import uuid_utils
 
-from aether.agents.base import BaseAgent, AgentTask, AgentContext, AgentResult
-from aether.memory.models import AgentRunModel
-from aether.memory.api import MemoryAPI
-from aether.tools.registry import ToolRegistry
+from aether.agents.base import AgentContext, AgentResult, AgentTask, BaseAgent
 from aether.core.events import EventBus
+from aether.memory.api import MemoryAPI
+from aether.memory.models import AgentRunModel
+from aether.tools.registry import ToolRegistry
+
 
 class AgentError(Exception):
     """Exception raised for agent execution errors."""
+
     pass
+
 
 class AgentRuntime:
     def __init__(
@@ -37,17 +41,15 @@ class AgentRuntime:
     def list_agents(self) -> list[str]:
         return list(self._registry.keys())
 
-    async def execute(
-        self, agent_type: str, task: AgentTask, context: AgentContext
-    ) -> AgentResult:
+    async def execute(self, agent_type: str, task: AgentTask, context: AgentContext) -> AgentResult:
         run_id = str(uuid_utils.uuid7())
         started_at = datetime.now(UTC).isoformat()
-        
+
         # Step 1: Resolve agent class from _registry dict
         agent_class = self._registry.get(agent_type)
         if not agent_class:
             raise AgentError(f"Unknown agent type: {agent_type!r}")
-            
+
         # Step 2: Instantiate agent with injected dependencies
         agent = agent_class(
             memory_api=self._memory_api,
@@ -79,7 +81,7 @@ class AgentRuntime:
                     "run_id": run_id,
                     "agent_name": agent_type,
                     "session_id": context.session_id,
-                }
+                },
             )
 
         start_time = asyncio.get_running_loop().time()
@@ -93,17 +95,17 @@ class AgentRuntime:
             result = await asyncio.wait_for(
                 agent.execute(task, context), timeout=task.timeout_seconds
             )
-            
+
             # Since AgentResult run_id must match, but the agent creates it without knowing run_id?
             # Wait, AgentResult has run_id field. But the agent execution returns AgentResult.
             # The agent doesn't know the run_id unless we pass it to the agent, or we override it here.
             # Or the agent creates AgentResult and sets run_id to something, then we replace it?
             # Wait, `AgentResult` is frozen. So we create a new one using model_copy.
             result = result.model_copy(update={"run_id": run_id})
-            
+
             success = result.success
             error_msg = result.error
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Step 6: On timeout
             error_msg = "Timeout"
             result = AgentResult(
@@ -133,7 +135,7 @@ class AgentRuntime:
                 duration_ms=int((asyncio.get_running_loop().time() - start_time) * 1000),
                 error=error_msg,
             )
-            
+
         completed_at = datetime.now(UTC).isoformat()
         status_str = "completed" if success else "failed"
 
@@ -168,7 +170,7 @@ class AgentRuntime:
                     "session_id": context.session_id,
                     "success": success,
                     "error": error_msg,
-                }
+                },
             )
 
         # Step 10: Return AgentResult

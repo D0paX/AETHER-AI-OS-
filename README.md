@@ -5,7 +5,7 @@ Personal AI Operating System — inspired by JARVIS.
 E:\Aether
 
 ## Development Status
-Phase 1 — Foundation (In Progress)
+Phase 1 — Foundation (Complete)
 
 ## Architecture
 See docs/architecture/ for all governing documents.
@@ -26,5 +26,5 @@ See docs/environments/windows-setup.md (created in M0).
 - [x] **M1.7**: Agent Runtime + Conversation Agent
 - [x] **M1.8**: Session Manager
 - [x] **M1.9**: CLI Interface **[TEXT MILESTONE ACHIEVED]**
-- [ ] M1.10: Voice Service
-- [ ] M1.11: Backup + Architecture Validation
+- [x] **M1.10**: Voice Service **[VOICE MILESTONE ACHIEVED]**
+- [x] **M1.11**: Backup + Architecture Validation **[PHASE 1 COMPLETE]**

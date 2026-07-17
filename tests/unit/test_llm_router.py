@@ -236,4 +236,5 @@ async def test_structured_output_returns_pydantic_model(router: LLMRouter) -> No
             response_schema=DummySchema,
         )
 
-        assert response.structured and response.structured.name == "test"
+        assert response.structured
+        assert response.structured.name == "test"

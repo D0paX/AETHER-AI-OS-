@@ -83,7 +83,7 @@ async def test_list_filters_by_status(task_manager):
 
 @pytest.mark.asyncio
 async def test_active_summary_includes_task_titles(task_manager):
-    t1 = await task_manager.create(title="Critical Fix", priority=TaskPriority.CRITICAL)
+    await task_manager.create(title="Critical Fix", priority=TaskPriority.CRITICAL)
     t2 = await task_manager.create(title="Medium Feature", priority=TaskPriority.MEDIUM)
     await task_manager.update_status(t2.id, TaskStatus.ACTIVE)
 
