@@ -291,9 +291,10 @@ approved by the developer.
 implementation begins.
 
 **Process:**
-1. Per ADR-010 Section 7.1, create branch `phase/{N}` from `develop`.
-2. Confirm `main` and `develop` both reflect the fully closed state of the
-   prior phase (Step 25 of the prior cycle already merged and tagged).
+1. Per ADR-010 Section 7.1 (as amended by ADR-012), create branch
+   `phase/{N}` directly from `main`.
+2. Confirm `main` reflects the fully closed state of the prior phase
+   (Step 25 of the prior cycle already merged and tagged).
 3. Confirm a current, verified backup exists per ADR-010 Section 4 before
    any new-phase work begins.
 4. Update `README.md`'s milestone status table with the new phase's
@@ -586,14 +587,18 @@ branch.
 1. Follow the commit message format and permitted commit types from
    ADR-010 Section 7.3: `type(scope): description`, one logical change
    per commit.
-2. Commits accumulate on `phase/{N}` during milestone implementation.
-3. At milestone completion, a pull request is opened into `develop`; per
-   ADR-010 Section 7.2, the solo developer may self-merge once all CI
-   checks pass — required checks are `ci / lint`, `ci / architecture-check`,
-   `ci / test`.
+2. Commits accumulate on `phase/{N}` throughout the phase — across all
+   of its milestones, not reset or merged elsewhere at each individual
+   milestone's completion.
+3. Required CI checks (`ci / lint`, `ci / architecture-check`, `ci /
+   test`) run on every push to `phase/{N}` per ADR-010 Section 7.2 (as
+   amended by ADR-012) — there is no per-milestone pull request or merge
+   event. `phase/{N}` merges into `main` exactly once, at Phase Closure
+   (Step 25).
 
-**Exit condition:** Milestone's changes are merged into `develop` with a
-clean, correctly formatted commit history.
+**Exit condition:** Milestone's changes are committed to `phase/{N}`
+with a clean, correctly formatted commit history, and required CI
+checks pass on that branch.
 
 ---
 
@@ -754,8 +759,8 @@ if actually required.
 **Purpose:** Formally merge and finalize the phase in the repository.
 
 **Process:**
-1. Merge `phase/{N}` into `develop`, then `develop` into `main`, per the
-   branch protection rules in ADR-010 Section 7.2.
+1. Merge `phase/{N}` directly into `main`, per ADR-012 and the branch
+   protection rules in ADR-010 Section 7.2 (as amended).
 2. Create the phase completion tag (Step 18).
 3. Update `README.md` to mark the phase complete.
 4. Update `CHANGELOG.md` with the final phase-completion entry.
@@ -973,7 +978,7 @@ Phase 1, are made permanent here for every phase without exception:
 
 ---
 
-*Document Version: 1.1*
+*Document Version: 1.2*
 *Status: ACCEPTED — ENFORCED*
 *Constitutional Tier: Tier 2*
 *Applies From: Immediately, governing the remainder of Phase 1 (from
@@ -981,7 +986,12 @@ Milestone M1.11's Claude Review Workflow onward) and every phase thereafter*
 *Amendment History: v1.1 — Step 22 now names PHASE_{N}_DEFINITION_OF_DONE_
 REPORT.md as its produced artifact; Section 6's document table completed to
 list all seven templates from AETHER_DEFINITION_OF_DONE.md (previously
-listed four); added Section 6.1 recording the Phase 1 Closure Exception*
+listed four); added Section 6.1 recording the Phase 1 Closure Exception.
+v1.2 — Phase Initialization, Step 22 (Version Control), and Step 25
+(Phase Closure) corrected per ADR-012-SIMPLIFIED_BRANCH_MODEL.md: the
+develop branch was never actually implemented (DEBT-016) — phase/{N}
+now branches directly from main, and merges directly into main at Phase
+Closure, with no intermediate per-milestone merge event.*
 *Review Trigger: Any phase-transition incident, or at the completion of
 each phase*
 *Owner: Principal Systems Engineer*
