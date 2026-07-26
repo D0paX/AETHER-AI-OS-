@@ -109,7 +109,9 @@ M2.1.6 — Conversation Interface Remediation (inserted post-hoc — see below)
 M2.1.7 — Test Isolation and FTS5 Fixture Correctness (inserted post-hoc — see below)
 M2.1.8 — Memory Quality: Immediate Fact Capture (inserted post-hoc — see below)
 M2.1.9 — Codebase-Wide Lint & Type Remediation (inserted post-hoc — see below)
-M2.1.10 — Test Fixture and Script Robustness Cleanup (inserted post-hoc — see below)
+M2.1.10 — Voice Pipeline Restoration (inserted post-hoc — see below)
+M2.1.11 — Test Fixture and Script Robustness Cleanup, plus DEBT-011 investigation (inserted post-hoc — see below)
+M2.1.12 — Retrieval Resilience: Fallback Matching and Rerank Weighting (inserted post-hoc — see below)
 M2.2  — Security Module (SafetyValidator)
 M2.3  — PC Control Core: Application Control
 M2.4  — PC Control Core: File Operations
@@ -139,24 +141,52 @@ is documented here, in the dependency graph (Section 5), and in its own
 full milestone entry in Section 3, rather than silently absorbed into
 either M2.1's or M2.2's scope.
 
-**M2.1.6, M2.1.7, M2.1.8, M2.1.9, and M2.1.10 were inserted for the same
-reason, compounding one layer further.** M2.1.5's own diagnostic
-investigation surfaced DEBT-007 (the conversation interface). M2.1.6's
-own execution — specifically, its required manual TEXT MILESTONE
-re-run — then surfaced two more: DEBT-008 (integration tests writing
-directly to the real database, which had already caused an unauthorized
-deletion of 47 real rows before this milestone existed to prevent it)
-and DEBT-009 (the consolidation threshold and per-turn memory quality
-gap meaning Phase 1's original TEXT MILESTONE claim was very likely
-never genuinely validated). By explicit developer decision, all five
-debt items remaining open after the M2.1 review — DEBT-004, DEBT-005,
-DEBT-006, DEBT-008, DEBT-009 — are resolved before M2.2. Sequenced by
-priority and genuine dependency: M2.1.7 (DEBT-008 + DEBT-004, test
-infrastructure safety) first, since no further testing should occur
-without it; M2.1.8 (DEBT-009, the core memory-quality fix) second, the
-most architecturally significant of the five; M2.1.9 (DEBT-005) and
-M2.1.10 (DEBT-006) last, exactly as originally sequenced, only renumbered
-to make room.
+**M2.1.6 through M2.1.12 were inserted for the same reason, compounding
+one layer further with each milestone's own execution.** M2.1.5's own
+diagnostic investigation surfaced DEBT-007 (the conversation interface).
+M2.1.6's own execution — specifically, its required manual TEXT
+MILESTONE re-run — then surfaced two more: DEBT-008 (integration tests
+writing directly to the real database, which had already caused an
+unauthorized deletion of 47 real rows before this milestone existed to
+prevent it) and DEBT-009 (the consolidation threshold and per-turn
+memory quality gap meaning Phase 1's original TEXT MILESTONE claim was
+very likely never genuinely validated). M2.1.7's own validation then
+surfaced DEBT-010 (the same isolation gap extending to Qdrant, a
+confirmed orphaned vector already present in production), resolved
+within that same milestone's own extended scope (Part 2) rather than
+deferred. M2.1.8's own required manual TEXT MILESTONE re-run then
+surfaced DEBT-012 (memory retrieval fragile when Qdrant is momentarily
+unavailable, and the rerank formula underweighting importance relative
+to similarity — the capture mechanism DEBT-009 fixed is proven correct;
+this is the read-side counterpart). M2.1.9's own required Voice
+Milestone regression attempt then surfaced two more, both severe:
+DEBT-013 (STT completely non-functional — torch installed CPU-only, no
+CUDA, a specification-level root cause in `pyproject.toml` that will
+silently recur on any fresh environment setup) and DEBT-014 (VAD raising
+on every listening-state frame due to a sample-size mismatch,
+independent of DEBT-013 and compounding with it).
+
+By explicit developer decision, all debt items opened across this
+sequence — DEBT-004 through DEBT-014, excluding none — are resolved
+before M2.2. Sequenced by priority and genuine dependency: M2.1.6
+(DEBT-007, the primary interaction surface) first; M2.1.7 (DEBT-008 +
+DEBT-004, later extended to also resolve DEBT-010, test infrastructure
+safety) second, since no further testing should occur without it;
+M2.1.8 (DEBT-009, the core memory-quality write-side fix) third, the
+most architecturally significant single item; M2.1.9 (DEBT-005) fourth,
+exactly as originally sequenced, only renumbered to make room; M2.1.10
+(DEBT-013 + DEBT-014, voice pipeline restoration) fifth — inserted
+ahead of the original fixture-cleanup milestone not only for severity
+but because DEBT-011's investigation (originally scheduled there) was
+found under the same broken torch environment DEBT-013 describes, and
+any root-cause theory formed against a non-representative environment
+risks being wrong; M2.1.11 (DEBT-006, plus the now-properly-timed
+DEBT-011 investigation) sixth; M2.1.12 (DEBT-012, the memory-quality
+read-side fix) last, sequenced deliberately rather than immediately
+after M2.1.8, since none of the intervening milestones' own testing
+meaningfully exercises question-form recall, and this fix benefits from
+not being rushed given the risk of regressing Milestone M1.5's
+already-passing cross-session test.
 
 ---
 
@@ -727,11 +757,188 @@ unaffected.
 
 ---
 
-### M2.1.10 — TEST FIXTURE AND SCRIPT ROBUSTNESS CLEANUP
+### M2.1.10 — VOICE PIPELINE RESTORATION
 
-**Purpose:** Resolve DEBT-006 — the smallest and lowest-priority of the
-three, addressed now by explicit developer decision rather than left to
-accumulate further or wait for M2.15.
+**Purpose:** Resolve DEBT-013, DEBT-014, and DEBT-018 — all three
+independently leave the voice pipeline unable to complete the Voice
+Milestone sequence. DEBT-013 and DEBT-014 were found during M2.1.9's
+own required Voice Milestone regression attempt. DEBT-018 was found
+during THIS milestone's own required Voice Milestone re-run attempt,
+after DEBT-013 and DEBT-014 were already fixed — the pipeline booted
+correctly for the first time, and that is precisely what exposed a
+third, independent defect that a broken pipeline could never have
+surfaced.
+
+**This milestone runs in two parts, for the same reason M2.1.7 did: the
+first part's own required validation found the reason the second part
+exists.** Part 1 (torch CUDA, VAD frame size) is complete and rigorously
+proven: `torch.cuda.is_available() == True` on torch 2.13.0+cu126,
+VRAM increasing 1494→3499 MiB on Whisper load, the VAD callback
+processing 156 real frames with zero exceptions and self-advancing
+LISTENING→TRANSCRIBING, and a fresh `uv sync` confirmed to install
+CUDA torch by default (zero CPU-torch references in the lockfile).
+Sequenced ahead of the fixture-cleanup milestone (renumbered to
+M2.1.11) for a correctness reason, not only severity: DEBT-011 (the
+Windows torch/transformers full-suite crash) was found under the same
+broken, CPU-only torch environment DEBT-013 describes, and investigating
+it before this milestone would mean root-causing a crash against a
+non-representative environment. Part 2 fixes DEBT-018 (wake word
+activation unreachable by any documented means — three independent,
+compounding faults in how the Porcupine access key is meant to reach
+the code) before the actual Voice Milestone sequence can run at all.
+
+**Objectives (Part 1 — complete):** Reinstall torch with the correct
+CUDA 12.x build. Correct `pyproject.toml` so a fresh environment setup
+installs the CUDA build by default. Correct the VAD frame-size mismatch,
+verified against the installed model's own stated contract (512 samples
+at 16kHz, not the original 480-sample design estimate). Update
+V1_TECHNICAL_SPECIFICATION.md Sections 9.2/9.3 (not 5.7, per the
+confirmed actual location) to match.
+
+**Objectives (Part 2 — required before closure):** Fix all three
+compounding faults DEBT-018 identified: `.env` still holds the literal
+placeholder value, not a real key (the developer's own action to
+resolve — see below); `services/voice/pipeline.py` reads a bare,
+disconnected `os.getenv("PORCUPINE_ACCESS_KEY")` instead of the
+established `AETHER_VOICE__PORCUPINE_ACCESS_KEY` convention every other
+config value in this project already uses; and nothing loads `.env`
+into `os.environ` in the first place, because `AetherConfig`'s
+`SettingsConfigDict` — specified back in Milestone M1.2's original
+prompt — never included `env_file=".env"`. This last one is a
+specification omission from that original prompt, corrected here the
+same way M2.1.5 corrected SessionManager's constructor: named plainly
+as a spec error, not silently patched around.
+
+**Deliverables (Part 1 — complete):** A working, CUDA-accelerated STT
+path and a functioning VAD, both rigorously proven per the evidence
+above.
+
+**Deliverables (Part 2 — required):** `AetherConfig` correctly loading
+`.env` into settings resolution. `VoiceConfig` gaining a
+`porcupine_access_key` field, populated automatically once `.env`
+loading works. `pipeline.py` reading through `config.voice.
+porcupine_access_key`, never a bare `os.getenv()` call. A startup check
+that fails loudly and actionably if the configured key is missing or is
+still the literal placeholder value — not a quiet log line a developer
+could miss. D-002 ("add UI to configure the Picovoice key") is resolved
+as a side effect of this fix, not tracked separately — once the
+established `.env` convention actually works for this value the way it
+already does for every other config value, there is no separate UI to
+build.
+
+**Dependencies:** M2.1.9 (this milestone remediates defects that
+milestone's own required regression attempt surfaced).
+
+**Files Created:** None.
+**Files Modified:** `pyproject.toml` (CUDA-enabled torch index/pin, Part
+1), `services/voice/pipeline.py` (VAD frame size Part 1; Porcupine key
+read path Part 2), `V1_TECHNICAL_SPECIFICATION.md` Sections 9.2/9.3
+(Part 1), `aether/core/config.py` (`env_file=".env"`, Part 2),
+`VoiceConfig`'s model definition (`porcupine_access_key` field, Part 2),
+`services/voice/wake_word.py` if the bare `os.getenv()` call actually
+lives there instead of `pipeline.py` — confirm the exact location before
+editing, do not assume.
+**Public APIs:** None.
+**Internal APIs:** None.
+
+**Tests Required (Part 1 — met):** `torch.cuda.is_available()` verified
+True. VAD callback driven with a real frame, zero exceptions. Full Voice
+Milestone sequence attempted — this is what surfaced DEBT-018.
+
+**Tests Required (Part 2):** A test proving `AetherConfig` correctly
+resolves `AETHER_VOICE__PORCUPINE_ACCESS_KEY` from a `.env` file into
+`config.voice.porcupine_access_key` — using a test value, not a real
+key, to prove the wiring alone. A test proving startup fails loudly and
+specifically when the key is missing or equals the known placeholder
+string, with an actionable message (per ADR-011 Section 9.2) telling the
+developer exactly what to do — not a generic error.
+
+**Validation Required (Part 1 — met):** `nvidia-smi` VRAM increase
+confirmed. Fresh `uv sync` confirmed to install CUDA torch.
+
+**Validation Required (Part 2):** With a real Picovoice key configured
+by the developer (see below — this specific step is not Claude Code's
+to perform), the full Milestone M1.10 Voice Milestone six-step sequence
+runs and is witnessed for the first time in this entire remediation
+arc — not driven-component testing as a substitute, per NB-2.
+
+**THE HUMAN HANDOFF POINT:** Claude Code cannot obtain a Picovoice
+access key — that requires a human account at console.picovoice.ai,
+exactly as Milestone M0's original environment validation always
+intended (Block 6, Step 20). Part 2's own scope ends once the config
+plumbing is fixed and proven correct with a test value. The developer
+then obtains a real key, places it in `.env` as `AETHER_VOICE__
+PORCUPINE_ACCESS_KEY=<real key>`, and personally runs and witnesses the
+actual Voice Milestone sequence — that specific action is not delegated
+to Claude Code.
+
+**Architecture Review:** V1_TECHNICAL_SPECIFICATION.md Sections 9.2/9.3
+(VAD, Part 1) and Section 14.1 / config system (Part 2) — the `env_file`
+addition is a correction to Milestone M1.2's original specification,
+recorded as such.
+
+**Security Review:** The startup check must never log the configured
+key's actual value, even when reporting that it's missing or a
+placeholder — confirm the actionable error message names what to do,
+not what the current (invalid) value is.
+
+**Performance Review:** End-to-end voice latency re-measured against
+Milestone M1.10's original targets (median < 2s, max < 3s) once the
+full sequence can actually run.
+
+**Documentation Updates:** `docs/technical-debt/DEBT_REGISTER.md` — mark
+DEBT-013, DEBT-014, and DEBT-018 resolved; mark D-002 resolved as a
+consequence of DEBT-018's fix, not separately. `V1_TECHNICAL_
+SPECIFICATION.md` Sections 9.2/9.3 and the config section, both
+corrected. `docs/environments/windows-validation-log.md` — note the CUDA
+reinstallation and the Porcupine key requirement; this document was
+found to be an unfilled template during Part 1's investigation
+(Milestone M0's environment validation was evidently never completed)
+— this is not tracked as its own open item, since what it would have
+caught has already been found and fixed through this remediation arc.
+
+**Definition of Done:** Levels 1–10 in full, across both parts together.
+Part 1 alone reaches Level 9. Level 10 — the actual, witnessed Voice
+Milestone sequence — requires Part 2's fix plus the developer's own
+handoff action above. This milestone's success also retroactively
+satisfies M2.1.9's deferred Level 4 claim.
+
+**Estimated Complexity:** Medium for Part 1 (met); Low-Medium for Part
+2 — the fix is well-understood (a known missing config setting, a known
+field, a known variable-name correction), the complexity is in getting
+the loud-failure messaging right, not the plumbing itself.
+**Risk Level:** High in significance — a founding pillar feature
+completely restored, or not — though low in regression risk given the
+starting state was fully broken, not partially working, for both parts.
+
+**Expected Output:** A genuinely functional voice pipeline, proven the
+same way every other defining claim in this remediation arc has been —
+witnessed, not asserted, with the one step that genuinely requires a
+human (obtaining a third-party credential) clearly identified as such
+rather than blurred into what Claude Code is expected to deliver.
+
+---
+
+### M2.1.11 — TEST FIXTURE AND SCRIPT ROBUSTNESS CLEANUP
+
+**Purpose:** Resolve DEBT-006, investigate DEBT-011, and resolve
+DEBT-015, addressed now by explicit developer decision rather than left
+to accumulate further or wait for M2.15. DEBT-011's investigation
+happens here, after M2.1.10, specifically so it examines a working CUDA
+torch environment rather than the broken one it was originally found
+under. DEBT-015 was found while committing and pushing the
+M2.1.5–M2.1.9 remediation work, ahead of this milestone's own execution,
+and grew in scope during that same push: beyond the original CI
+forbidden-pattern scan gaps (Alembic downgrade DDL, the by-design
+litellm import), it now also covers the same scan not knowing about
+import-linter's existing, correct exclusion of `aether.tasks` from the
+database-boundary contract, and two pre-commit hook misconfigurations —
+the mypy hook's isolated environment (present since Milestone M1.0's
+original configuration) and import-linter's inability to cleanly
+validate a partial/incremental commit. All four are tooling
+miscalibration, not application code defects, and all four are bundled
+here since it's the same category of test/CI infrastructure hygiene as
+DEBT-006 and DEBT-011.
 
 **Objectives:** Correct `test_task_workflow`'s outdated `AgentTask`
 shape (using the same locked fields — `description`, `goal`,
@@ -740,45 +947,179 @@ elsewhere). Correct `test_event_flow`'s stale `task_filter` mock
 signature — the specific remaining defect M2.1.5 already found but
 explicitly did not touch. Fix `start.ps1`/`stop.ps1` treating
 `docker-compose`'s normal stderr progress output as a failure signal.
+Investigate DEBT-011 (the full-suite Windows torch/transformers access
+violation) now that M2.1.10 has restored a genuine CUDA environment —
+determine whether the crash still reproduces, and if so, root-cause it
+properly rather than working around it file-by-file indefinitely.
+Narrow the forbidden-pattern scan in `.github/workflows/ci.yml` to
+exclude `migrations/` from the `DROP TABLE` check, change the `litellm`
+check from "found anywhere" to "found outside `aether/llm/_providers/`,"
+and align the `sqlalchemy` check with import-linter's own already-
+correct exclusion of `aether.tasks` rather than flagging what the
+boundary tool already permits (DEBT-015). Switch the pre-commit mypy
+hook from `additional_dependencies` to `language: system`, `entry: uv
+run mypy aether/ services/ --strict`, mirroring the import-linter
+hook's already-correct pattern from Milestone M1.0, so it validates
+against the real project environment instead of an isolated one
+containing only pydantic. Add `.venv.old/` to `.gitignore` (or remove
+the directory entirely, now that its diagnostic purpose — confirming
+DEBT-013's root cause — is served) — a small, low-ceremony addition to
+this milestone's existing tooling-hygiene scope, not its own debt item.
 
 **Deliverables:** Both named tests passing for the correct reason, not
 skipped or loosened. `start.ps1`/`stop.ps1` usable without the developer
 needing to bypass them manually, as M2.1's and M2.1.5's own execution
-reports both had to do.
+reports both had to do. A determination on DEBT-011 — fixed, or
+root-caused and documented if not immediately fixable. CI's
+forbidden-pattern scan passing green against the actual, correct
+architecture rather than a known, explained-away false positive. A
+functioning pre-commit mypy hook, for the first time since Milestone
+M1.0. `.venv.old/` no longer at risk of being accidentally committed.
 
-**Dependencies:** M2.1.9 (sequenced last per the debt register's
-original priority ordering; no genuine technical dependency on it).
+**Dependencies:** M2.1.10 (this milestone's DEBT-011 investigation
+specifically depends on a working torch/CUDA environment existing first
+— a genuine technical dependency, not only priority ordering).
 
-**Files Created:** None.
+**Files Created:** None expected for DEBT-006; DEBT-011's investigation
+may require none, depending on findings.
 **Files Modified:** `tests/integration/test_task_workflow.py`,
 `tests/integration/test_event_flow.py`,
-`infrastructure/scripts/start.ps1`, `infrastructure/scripts/stop.ps1`.
+`infrastructure/scripts/start.ps1`, `infrastructure/scripts/stop.ps1`,
+`.github/workflows/ci.yml` (forbidden-pattern scan scoping, DEBT-015),
+`.pre-commit-config.yaml` (mypy hook, DEBT-015), `.gitignore`
+(`.venv.old/`).
 **Public APIs:** None.
 **Internal APIs:** None.
 
-**Tests Required:** The two named tests, corrected and passing.
+**Tests Required:** The two named tests, corrected and passing. A
+full-suite integration run attempted (not file-by-file) to determine
+whether DEBT-011 still reproduces against the now-corrected environment.
 
 **Validation Required:** `.\infrastructure\scripts\start.ps1` completes
 without manual intervention or a stderr-triggered abort. Same for
-`stop.ps1`.
+`stop.ps1`. CI's forbidden-pattern scan passes green on a commit
+containing a legitimate Alembic `downgrade()` DROP TABLE, the existing
+`litellm` import inside `aether/llm/_providers/`, and `tasks/manager.py`'s
+existing `sqlalchemy` import, while still failing if any of these
+patterns appear outside their legitimate location — prove the narrowed
+scan still catches a genuine violation, not only that it stops flagging
+false ones. `uv run pre-commit run --all-files` — the mypy hook produces
+real, accurate results (zero phantom missing-stub errors) rather than
+failing on its own empty environment.
 
-**Architecture Review:** None — test and script fixes only.
+**Architecture Review:** None for DEBT-006 — test and script fixes only.
+DEBT-015's `aether.tasks` scan alignment references import-linter's
+existing contract as the source of truth, per DEBT-017's finding that
+this exclusion is architecturally deliberate — this milestone does not
+resolve DEBT-017 itself, only stops the scan from contradicting an
+already-correct boundary tool.
 
-**Security Review:** None new.
+**Security Review:** DEBT-015's fix is verified to still catch genuine
+violations (see Validation Required) — a scan narrowed carelessly could
+create a real gap while fixing a false-positive one.
 
 **Performance Review:** None new.
 
 **Documentation Updates:** `docs/technical-debt/DEBT_REGISTER.md` — mark
-DEBT-006 resolved.
+DEBT-006 and DEBT-015 resolved; mark DEBT-011 resolved or update its
+status with the root-cause finding.
 
-**Definition of Done:** Levels 1, 2, 4, 9.
+**Definition of Done:** Levels 1, 2, 4, 5 (Security Done, for DEBT-015's
+verified-still-catches-real-violations check), 9.
 
-**Estimated Complexity:** Low.
+**Estimated Complexity:** Low for DEBT-006 and DEBT-015; unknown for
+DEBT-011 until investigated against a working environment.
 **Risk Level:** Low.
 
-**Expected Output:** A fully green test suite and reliable start/stop
-scripts — the last of the four debt items opened by the M2.1 review
-resolved, clearing the way to M2.2 with a genuinely clean foundation.
+**Expected Output:** A fully green test suite, a genuinely green CI
+scan (not a known, tolerated false positive), a functioning pre-commit
+mypy hook, reliable start/stop scripts, and a resolved or properly
+root-caused DEBT-011 — investigated for the first time against an
+environment that actually represents production conditions.
+
+---
+
+### M2.1.12 — RETRIEVAL RESILIENCE: FALLBACK MATCHING AND RERANK WEIGHTING
+
+**Purpose:** Resolve DEBT-012 — found during M2.1.8's manual TEXT
+MILESTONE re-run, not during this milestone's own scope. The capture
+mechanism DEBT-009 fixed is proven correct; this is the read-side
+counterpart: a fact stored correctly is not reliably retrievable when
+Qdrant is unavailable, and even when it is, a high-importance fact can
+be outranked by a merely-similar episode. Sequenced after M2.1.9,
+M2.1.10, and M2.1.11 deliberately — none of those milestones' own
+testing meaningfully exercises question-form recall, so there was no
+reason to front-run them, and this fix benefits from not being rushed
+given the risk of regressing Milestone M1.5's already-passing
+cross-session test.
+
+**Objectives:** Loosen FTS/pg_trgm fallback matching (OR-semantics or
+equivalent) so a question can match its declarative answer without
+exact vocabulary overlap, and/or verify Qdrant readiness before serving
+a recall request rather than silently falling back. Reassess the
+reranker's `0.6/0.3/0.1` similarity/recency/importance weighting, or
+give `MemoryType.FACT` a categorical boost independent of the linear
+formula, so a high-importance fact reliably outranks a merely-similar
+episode. Audit and address the "leftover low-quality facts" Claude
+Code flagged as observed in the production store during M2.1.8.
+
+**Deliverables:** Reliable question-to-fact recall regardless of
+Qdrant's momentary readiness state. A `FACT`-type memory measurably and
+reliably outranking a competing episode of comparable similarity.
+
+**Dependencies:** M2.1.11 (sequenced last among all debt items opened
+across this remediation arc, per priority ordering — not a technical
+dependency).
+
+**Files Created:** None expected — extends `aether/memory/_retrieval/
+hybrid.py` and `aether/memory/_retrieval/reranker.py`, both already
+implemented in Phase 1's Milestone M1.5.
+**Files Modified:** `aether/memory/_retrieval/hybrid.py` (fallback
+matching), `aether/memory/_retrieval/reranker.py` (score formula or
+type-aware boost).
+**Public APIs:** None — `MemoryAPI.recall()`'s signature and return type
+are unchanged; only the ranking behind it improves.
+**Internal APIs:** None new.
+
+**Tests Required:** A test proving question-form recall succeeds via
+FTS-only fallback (Qdrant deliberately made unavailable in the test).
+A test proving a `MemoryType.FACT` at high importance outranks a
+competing episode of comparable or even higher raw similarity.
+**Mandatory regression:** Milestone M1.5's original cross-session test
+and all three of M2.1.8's fact-capture tests re-run and passing — any
+reranking change is validated against the scenarios that already worked,
+not only the new one being fixed.
+
+**Validation Required:** The specific failure scenario M2.1.8 observed
+(Qdrant momentarily unavailable, question-form query) reproduced and
+confirmed fixed.
+
+**Architecture Review:** V1_TECHNICAL_SPECIFICATION.md Section 2.5
+(`HybridRetrieval`, the reranker score formula) — this is a tuning
+change to already-approved architecture, not new architectural surface.
+
+**Security Review:** None new.
+
+**Performance Review:** Confirm loosened FTS matching does not
+materially degrade precision for unrelated queries — a looser fallback
+that returns too much irrelevant content is a different failure mode,
+not obviously better than the one being fixed.
+
+**Documentation Updates:** `docs/technical-debt/DEBT_REGISTER.md` — mark
+DEBT-012 resolved. `V1_TECHNICAL_SPECIFICATION.md` Section 2.5 updated
+with the corrected formula or matching logic.
+
+**Definition of Done:** Levels 1–9 in full, held to the same regression
+rigor as any change touching a locked retrieval path.
+
+**Estimated Complexity:** Medium — tuning a scoring formula correctly,
+without regressing what already works, requires real care.
+**Risk Level:** Medium-High — this is the last piece of the core memory
+promise's reliability, and the one most likely to have subtle knock-on
+effects on unrelated recall scenarios if rushed.
+
+**Expected Output:** Aether recalls a stored fact reliably, not only
+under ideal conditions — closing the loop DEBT-009 opened.
 
 ---
 
@@ -1697,15 +2038,24 @@ dependencies instead.
 
 ```
 WAVE 1 — Foundation Preparation
-  M2.0, M2.1, M2.1.5, M2.1.6, M2.1.7, M2.1.8, M2.1.9, M2.1.10
+  M2.0, M2.1, M2.1.5, M2.1.6, M2.1.7, M2.1.8, M2.1.9, M2.1.10, M2.1.11,
+  M2.1.12
   Verify prerequisites; take the phase's highest-risk operation
   (database migration) first, while least new work is at stake.
-  M2.1.5 through M2.1.10 were not originally planned here — each was
+  M2.1.5 through M2.1.12 were not originally planned here — each was
   inserted after the one before it surfaced further debt in pre-existing
   Phase 1 code, per Section 2's note above. M2.1.7 in particular exists
   because M2.1.6's execution touched real production data without prior
   authorization; no milestone after M2.1.6 runs its tests against
-  anything but the isolated database M2.1.7 establishes.
+  anything but the isolated database M2.1.7 establishes. M2.1.10 (Voice
+  Pipeline Restoration) exists because M2.1.9's own required regression
+  test surfaced STT and VAD both completely non-functional, with a
+  specification-level root cause; it was inserted ahead of the
+  originally-planned fixture-cleanup milestone specifically because that
+  milestone's own DEBT-011 investigation would otherwise examine the
+  same broken torch environment DEBT-013 describes. M2.1.12 exists
+  because M2.1.8's own required acceptance test — even after fixing the
+  write-side gap — surfaced a read-side one.
 
 WAVE 2 — Security Layer
   M2.2
@@ -1779,8 +2129,18 @@ M2.1.9  (hard dependency on M2.1.8 — sequenced after both correctness
   │       fixes; scope explicitly excludes cli.py/api.py because
   │       M2.1.6 already leaves them clean)
   ▼
-M2.1.10 (sequenced after M2.1.9 by priority ordering, not genuine
-  │       technical dependency)
+M2.1.10 (hard dependency on M2.1.9 — remediates defects that
+  │       milestone's own required regression attempt surfaced)
+  ▼
+M2.1.11 (hard dependency on M2.1.10 — its DEBT-011 investigation
+  │       specifically requires the working CUDA environment M2.1.10
+  │       restores; DEBT-006 itself has no such dependency, but the two
+  │       are bundled in one milestone)
+  ▼
+M2.1.12 (sequenced after M2.1.11 by deliberate choice — a fix to a
+  │       locked retrieval path benefits from following the mechanical
+  │       cleanup and restoration milestones, not preceding them, given
+  │       the regression risk against Milestone M1.5's cross-session test)
   ▼
 M2.2 ──────────┬─────────────┬─────────────┐
   │            │             │             │
@@ -2217,9 +2577,9 @@ instruction again.
 
 ---
 
-*Document Version: 1.4*
+*Document Version: 2.0*
 *Status: APPROVED FOR EXECUTION*
-*Governs: Milestones M2.0 through M2.15, plus M2.1.5 through M2.1.10, in
+*Governs: Milestones M2.0 through M2.15, plus M2.1.5 through M2.1.12, in
 the order given*
 *Amendment History: v1.1 — inserted M2.1.5 (Foundation Remediation)
 after M2.1's execution surfaced three P1 defects in pre-existing Phase 1
@@ -2234,33 +2594,115 @@ corrected here, not merely patched in implementation.
 v1.2 — inserted M2.1.6, M2.1.7, M2.1.8 (original numbering) by explicit
 developer decision to resolve all three remaining open debt items
 (DEBT-007, DEBT-005, DEBT-006) from the M2.1 review before M2.2.
-v1.3 — M2.1.6's own execution (specifically, its required manual TEXT
-MILESTONE re-run) surfaced two further debt items: DEBT-008
-(integration tests writing directly to the real production database
-with no isolation — which had already resulted in an unauthorized
-deletion of 47 real rows before this milestone existed to prevent
-recurrence) and DEBT-009 (consolidation_min_messages=5 meaning normal
-short conversations never produce a durable fact, and per-turn memory
-quality being insufficient on its own — meaning Phase 1's original TEXT
-MILESTONE claim was very likely never genuinely validated, consistent
-with DEBT-002's finding that real consolidation never ran in Phase 1).
-By explicit developer decision, all five debt items remaining open after
-the M2.1 review — DEBT-004, DEBT-005, DEBT-006, DEBT-008, DEBT-009 —
-are resolved before M2.2. The original M2.1.7 (DEBT-005) and M2.1.8
-(DEBT-006) are renumbered to M2.1.9 and M2.1.10 without content change,
-to make room for new M2.1.7 (DEBT-008 + DEBT-004, test infrastructure
-safety, sequenced first since no further testing should occur without
-it) and new M2.1.8 (DEBT-009, the core memory-quality fix, sequenced
-second as the most architecturally significant of the five).*
+v1.3 — M2.1.6's own execution surfaced DEBT-008 (test isolation gap,
+including an unauthorized deletion of 47 real rows before this milestone
+existed to prevent recurrence) and DEBT-009 (consolidation threshold and
+per-turn memory quality, meaning Phase 1's original TEXT MILESTONE claim
+was very likely never genuinely validated). The original M2.1.7
+(DEBT-005) and M2.1.8 (DEBT-006) renumbered to M2.1.9 and M2.1.10
+without content change, to make room for new M2.1.7 (DEBT-008 +
+DEBT-004) and new M2.1.8 (DEBT-009).
+v1.4 — M2.1.7's own validation surfaced DEBT-010 (the same isolation gap
+extending to Qdrant — a confirmed orphaned vector in production, 30
+points against 29 SQL rows), resolved within M2.1.7's own extended
+scope (Part 2) rather than deferred to a new milestone number, since it
+was the same underlying guard pattern applied to two more targets.
+v1.5 — DEBT-009 confirmed resolved: M2.1.8's manual TEXT MILESTONE
+re-run succeeded, traced to a genuine MemoryType.FACT record. That same
+re-run surfaced DEBT-012 (memory retrieval fragile when Qdrant is
+momentarily unavailable, and the rerank formula underweighting
+importance relative to similarity). Inserted as M2.1.11 at that time.
+v1.6 — DEBT-005 confirmed resolved via M2.1.9. That milestone's own
+required Voice Milestone regression attempt surfaced two more, both
+severe: DEBT-013 (STT completely non-functional — torch installed
+CPU-only, cublas64_12.dll absent, a specification-level root cause in
+pyproject.toml that will silently recur on any fresh environment setup)
+and DEBT-014 (VAD raising on every listening-state frame due to a
+sample-size mismatch, independent of and compounding with DEBT-013).
+Inserted as new M2.1.10 (Voice Pipeline Restoration), renumbering the
+former M2.1.10 (DEBT-006) to M2.1.11 and the former M2.1.11 (DEBT-012)
+to M2.1.12. This insertion was sequenced ahead of the fixture-cleanup
+milestone for a correctness reason, not only severity: that milestone's
+own DEBT-011 investigation (a Windows torch/transformers full-suite
+crash, found during M2.1.7 Part 2) was discovered under the same broken,
+CPU-only torch environment DEBT-013 describes — investigating DEBT-011
+before fixing DEBT-013 would mean root-causing a crash against a
+non-representative environment. M2.1.11 (renumbered) now explicitly
+carries both DEBT-006 and the properly-sequenced DEBT-011 investigation.
+v1.7 — DEBT-015 (forbidden-pattern CI scan too broad — flagging
+legitimate Alembic downgrade() DROP TABLE and the by-design litellm
+import inside aether/llm/_providers/) found while committing and
+pushing M2.1.5–M2.1.9 remediation work, ahead of M2.1.10's own
+execution. Bundled into M2.1.11's existing scope rather than given a
+new milestone number, since it is the same category of test/CI
+infrastructure hygiene as DEBT-006 and DEBT-011, not an application
+code defect. No renumbering required.
+v1.8 — While executing the M2.1.5–M2.1.9 commit-and-push task (an
+operational task, not a numbered milestone), three further findings
+emerged. DEBT-015 broadened: the forbidden-pattern scan also doesn't
+know about import-linter's existing, correct exclusion of aether.tasks,
+and the pre-commit mypy hook has been misconfigured (isolated
+environment containing only pydantic) since Milestone M1.0's original
+configuration — both folded into M2.1.11's already-existing scope, no
+new milestone. DEBT-016 opened: no develop branch has ever existed,
+contradicting ADR-010 Section 7.1's branch model; candidate resolution
+is simplifying to main + phase/N via the Constitutional Amendment
+Process rather than retroactively creating develop, deferred to before
+Phase 2 Closure (Step 25), not before M2.2. DEBT-017 opened:
+TaskManager's database-access exemption (already correct per
+import-linter) is undocumented and lacks Memory's private-store/
+public-manager structural split; opportunistic, no phase deadline. The
+M1.9 commit that originally motivated this investigation (fad6019) was
+confirmed present on main; all but two of its 7 original CI failures
+are now resolved by the M2.1.5–M2.1.9 remediation arc, with the
+remaining two being DEBT-015 itself.
+v1.9 — M2.1.10's own required Voice Milestone re-run attempt, after
+Part 1's fixes (DEBT-013, DEBT-014) were already proven correct,
+surfaced a third, independent defect: DEBT-018 (wake word activation
+unreachable by any documented means — the Porcupine access key is
+placeholder-only in .env, pipeline.py reads a disconnected bare
+os.getenv() call under a different variable name than the established
+convention, and AetherConfig never loads .env into settings resolution
+at all, a specification omission from Milestone M1.2's original
+prompt). M2.1.10 restructured into Part 1 (complete) and Part 2
+(required before Level 10, fixing DEBT-018), mirroring M2.1.7's
+Part 1/Part 2 pattern rather than a new milestone number, since the
+milestone's own Definition of Done — the Voice Milestone actually
+running — was not yet met regardless of Part 1's correctness. D-002
+("add UI to configure the Picovoice key") resolved as a direct
+consequence of DEBT-018's fix, not tracked separately. A numbering
+collision surfaced independently: Claude Code's own repository-side
+DEBT_REGISTER.md had separately opened an unrelated entry also
+numbered DEBT-015 during its own investigation. This document's
+DEBT-015 (the broader, four-part CI/tooling entry already targeting
+M2.1.11) remains canonical; the colliding repository-side entry is
+struck once confirmed to contain nothing not already covered here.
+v2.0 — M2.1.10 Part 2 (DEBT-018, wake word configuration plumbing)
+completed at the code level; D-002 resolved as its direct consequence.
+By explicit developer decision, the remaining open items — D-001,
+DEBT-006, DEBT-011, DEBT-012, both DEBT-015 entries, DEBT-016, and
+DEBT-017 — are resolved together rather than sequenced across further
+renumbered milestones. DEBT-016 resolved directly, today, via
+ADR-012-SIMPLIFIED_BRANCH_MODEL.md — a Constitutional Amendment under
+ADR-010 Section 16.4, not a Claude Code implementation task; ADR-010
+Section 7.1 and AETHER_PHASE_EXECUTION_WORKFLOW.md Steps 22 and 25 are
+amended accordingly. The remaining seven items are executed as five
+focused, independently-scoped prompts rather than as M2.1.11's and
+M2.1.12's originally-planned single combined prompts — the milestone
+identities and their debt-item content are unchanged, only the
+execution granularity, per explicit developer request to close
+everything today. DEBT-012 is explicitly sequenced last among the five,
+per this document's own prior reasoning (Section on M2.1.12): a rerank
+formula change touches every memory recall in the system and warrants
+the same mandatory regression discipline regardless of how many other
+items are cleared in the same session.*
 *Filename Note: Produced as `PHASE_2_IMPLEMENTATION_PLAN.md`, matching
 AETHER_PHASE_EXECUTION_WORKFLOW.md Section 6's naming template and
 PHASE_2_TECHNICAL_SPECIFICATION.md's own forward reference, rather than
 the "FOUNDATION"-suffixed name given in the request that produced this
 document — "Foundation" was Phase 1's codename, not Phase 2's*
-*Next Action: M2.1.7 Part 2 prompt generated (Qdrant/Redis isolation
-extension, plus orphan cleanup) after Part 1's own validation found the
-same isolation gap uncovered in Qdrant; awaiting developer execution and
-review before M2.1.7 is considered closed, then M2.1.8, M2.1.9, M2.1.10
-in order, before M2.2*
+*Next Action: M2.1.10 implementation prompt generated (Voice Pipeline
+Restoration); awaiting developer execution and review, then M2.1.11,
+M2.1.12 in order, before M2.2*
 *Owner: Chief AI Architect / Principal Systems Engineer*
 *Last Updated: 2025-11-15*

@@ -1,3 +1,21 @@
+"""Task domain manager — CRUD and the task state machine.
+
+Database-boundary exemption (DEBT-017): this module imports SQLAlchemy directly,
+which the "Memory module boundary" import-linter contract forbids for every
+other consumer. The exemption is deliberate, not an oversight. Tasks are a
+separate domain, not a form of memory — AETHER_INTELLIGENCE_ARCHITECTURE.md's
+memory taxonomy has never classified tasks as memory; they are actionable to-do
+items, not recalled facts. Tasks share the same physical database as memories
+purely as infrastructure, not as a shared domain. The architectural principle
+throughout Aether is "each domain has exactly one gatekeeper," not "only one
+module may touch SQL anywhere" — so it is consistent for the Tasks domain to
+own its own database access, exactly as Memory's `_stores/` does for its domain.
+The invariant this rests on: nothing outside TaskManager may reach around it to
+touch the `tasks` table directly. (The private-store/public-manager structural
+split that Memory has is a separate, lower-priority opportunistic item, not part
+of this exemption.)
+"""
+
 import json
 from datetime import UTC, datetime
 from enum import Enum

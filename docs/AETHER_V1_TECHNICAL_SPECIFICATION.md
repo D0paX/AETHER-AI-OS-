@@ -1025,6 +1025,22 @@ class Session(BaseModel):
 
 **Purpose:** Task CRUD with state machine. All task state changes emit events.
 
+**Database-boundary exemption (DEBT-017):** TaskManager imports SQLAlchemy
+directly, which the "Memory module boundary" import-linter contract forbids for
+every other consumer. This is deliberate. Tasks are a separate domain, not a
+form of memory — the memory taxonomy in AETHER_INTELLIGENCE_ARCHITECTURE.md has
+never classified tasks as memory; they are actionable to-do items, not recalled
+facts. Tasks share the same physical database as memories purely as
+infrastructure, not as a shared domain. Aether's architectural principle is
+"each domain has exactly one gatekeeper," not "only one module may touch SQL
+anywhere," so it is consistent for the Tasks domain to own its own database
+access, exactly as Memory's `_stores/` does for its domain. The invariant: no
+module outside TaskManager may reach around it to touch the `tasks` table
+directly. Accordingly, `aether.tasks` is intentionally excluded from that
+contract's `source_modules` in `pyproject.toml`. (Giving TaskManager the same
+private-store/public-manager split Memory has is a separate, lower-priority
+opportunistic item — not part of this exemption.)
+
 **Task state machine:**
 ```
 PENDING → ACTIVE → COMPLETED
@@ -2121,7 +2137,7 @@ aether-core ←─────────────────────�
                            ▼
     ┌─────────────────────────────────────────────────────┐
     │                  LISTENING                          │
-    │  Silero VAD monitoring 30ms chunks                  │
+    │  Silero VAD monitoring 32ms chunks (512 samples)    │
     │  Accumulating audio in buffer                       │
     │  Timeout: 15 seconds of total listening             │
     └──────┬───────────────────────────────────┬──────────┘
@@ -2197,11 +2213,24 @@ vad_config = {
     "model": "silero_vad",
     "threshold": 0.5,           # Speech probability threshold
     "sampling_rate": 16000,
+    "frame_samples": 512,       # 32ms @ 16kHz — fixed by the model, not tunable
     "min_speech_duration_ms": 100,
     "max_speech_duration_s": 30,
     "min_silence_duration_ms": 800   # Silence before STT triggers
 }
 ```
+
+**Frame size is fixed by the model, not a design choice.** The installed Silero
+VAD accepts exactly 512 samples at 16kHz (256 at 8kHz) and raises for anything
+else, reporting: `Provided number of samples is N (Supported values: 256 for
+8000 sample rate, 512 for 16000)`. The original design estimated 30ms/480
+samples; that figure came from an older Silero release and was never valid for
+the pinned model — the pipeline sliced frames to 480 and therefore raised on
+every LISTENING-state frame, so silence detection never ran. Corrected in
+M2.1.10 (DEBT-014); the value lives in `services/voice/pipeline.py` as
+`VAD_FRAME_SAMPLES`. Verified directly against the model rather than assumed:
+160/256/320/480 are rejected as "too short", 640/768/1024/1536 are rejected as
+unsupported, and only 512 is accepted.
 
 ### 9.4 VRAM Management on RTX 4050 (6GB)
 

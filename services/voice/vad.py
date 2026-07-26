@@ -36,8 +36,13 @@ class SileroVAD:
 
     def is_speech(self, audio_chunk: np.ndarray) -> float:
         """
-        Returns speech probability (0.0 to 1.0) for a 480-sample chunk (30ms at 16kHz).
+        Returns speech probability (0.0 to 1.0) for a 512-sample chunk (32ms at 16kHz).
         Thread-safe (torch inference).
+
+        The chunk size is fixed by the installed Silero VAD model, which raises
+        for any other size, reporting "Supported values: 256 for 8000 sample
+        rate, 512 for 16000". The previous "480-sample (30ms)" figure came from
+        an older Silero release and no longer holds (M2.1.10 / DEBT-014).
         """
         if self._model is None:
             raise VoiceError("VAD model not loaded.")

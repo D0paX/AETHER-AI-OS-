@@ -225,7 +225,7 @@ git reset --hard <commit-hash>
 git reset --mixed HEAD~N     (when commits are pushed)
 git reset --soft HEAD~N      (when commits are pushed, without coordination)
 git commit --amend           (when the commit has been pushed)
-git rebase <any>             (on shared branches: main, develop)
+git rebase <any>             (on shared branches: main, phase/N)
 git rebase -i HEAD~N         (when commits are pushed)
 git filter-branch <any>
 git filter-repo <any>
@@ -235,10 +235,10 @@ git filter-repo <any>
 ```
 git push --force
 git push -f
-git push --force-with-lease  (Level 4 — requires Level 5 process if on main/develop)
+git push --force-with-lease  (Level 4 — requires Level 5 process if on main/phase branches)
 git push origin +<branch>
 git push origin :main        (deleting remote branch)
-git push origin :develop     (deleting remote branch)
+git push origin :phase/N     (deleting an active phase branch)
 ```
 
 **Workspace destruction:**
@@ -541,7 +541,7 @@ After any rollback, the following must be confirmed before resuming normal opera
 1. Do not push any changes
 2. Assess: what commits are affected?
 3. If on a feature branch: examine options without affecting shared branches
-4. If on main/develop: escalate — this is a serious situation
+4. If on main/phase branches: escalate — this is a serious situation
 5. Use `git reflog` to find the last known good state
 6. Document everything before executing any recovery commands
 
@@ -558,12 +558,22 @@ After any rollback, the following must be confirmed before resuming normal opera
 
 ### 7.1 Branch Structure
 
+> **AMENDED 2025-11-15 per ADR-012.** The original model below specified
+> a `develop` integration branch. DEBT-016 (found during Phase 2's
+> remediation arc) established that no `develop` branch had ever
+> existed in this repository, across either Phase 1 or Phase 2 —
+> `phase/N` has always branched directly from `main` in practice.
+> ADR-012 amends this section to match that reality, and gives the
+> reasoning: `develop`'s integration value doesn't apply to this
+> project's actual, enforced one-phase-at-a-time discipline, where
+> `develop` and `main` would always be identical at merge time. See
+> ADR-012 for full context.
+
 ```
 main          Protected. Production-equivalent. All milestones tagged here.
-develop       Protected. Integration branch. All feature branches merge here first.
-phase/N       Protected. Phase-specific integration branch.
-feature/X     Unrestricted. Individual feature development.
-fix/X         Unrestricted. Bug fix branches.
+phase/N       Protected. Phase-specific branch, branched directly from main.
+feature/X     Unrestricted. Individual feature development, branched from phase/N.
+fix/X         Unrestricted. Bug fix branches, branched from phase/N.
 experiment/X  Unrestricted. Experimental work — never merged to main directly.
 ```
 
@@ -581,7 +591,7 @@ experiment/X  Unrestricted. Experimental work — never merged to main directly.
 - Allow force pushes: NO
 - Allow deletions: NO
 
-**`develop` branch:**
+**`phase/N` branch:**
 - Require pull request before merging: YES (recommended — even for solo developer)
 - Required approvals: 0 (solo developer may self-merge after CI passes)
 - Require status checks to pass before merging: YES
@@ -591,7 +601,7 @@ experiment/X  Unrestricted. Experimental work — never merged to main directly.
 
 **Feature branches:**
 - No protection rules. Full flexibility.
-- Must not be named `main`, `develop`, or `phase/*`.
+- Must not be named `main` or `phase/*`.
 
 ### 7.3 Commit Standards
 
@@ -617,7 +627,7 @@ ADR: ADR-XXX (if this commit implements an architectural decision)
 - `milestone` — marks completion of a defined milestone
 
 **Forbidden commit practices:**
-- Commits directly to `main` or `develop` (bypasses PR process)
+- Commits directly to `main` or `phase/N` (bypasses PR process)
 - Commit messages that are single words: "fix", "update", "changes", "stuff"
 - Commit messages in all caps
 - Commit messages with emoji as the primary identifier
@@ -641,7 +651,7 @@ Tags are created manually. No automated tagging. Once pushed, a tag is permanent
 
 ## 8. CI/CD SAFETY GATES
 
-### 8.1 Required CI Checks (all must pass before merge to develop or main)
+### 8.1 Required CI Checks (all must pass before merge to phase/N or main)
 
 **Gate 1: Architecture Boundaries**  
 Command: `uv run lint-imports`  
@@ -1665,8 +1675,12 @@ To amend this document after the freeze:
 
 ---
 
-*Document Version: 3.0 (Sections 1-9: v1.0, Sections 10-16: v2.0, Sections 17-20: v3.0)*
+*Document Version: 3.1 (Sections 1-9: v1.0, Sections 10-16: v2.0,
+Sections 17-20: v3.0, Section 7.1 amended: v3.1)*
 *Status: ACCEPTED — ENFORCED — FROZEN AS CONSTITUTIONAL ARTIFACT*
 *Frozen Date: 2025-11-15*
 *Amendment Process: ADR-010 Section 16.4*
+*Amendment Record: Section 7.1 (Branch Structure) amended 2025-11-15 per
+ADR-012-SIMPLIFIED_BRANCH_MODEL.md, retiring the develop branch
+requirement — DEBT-016. All other sections remain as originally frozen.*
 *Owner: Principal Systems Engineer*

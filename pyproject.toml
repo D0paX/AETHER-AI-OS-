@@ -52,8 +52,12 @@ aether = "aether.__main__:main"
 [tool.setuptools.packages.find]
 include = ["aether*", "services*"]
 
-[tool.uv]
-dev-dependencies = [
+# Dev dependencies in PEP 735 form (D-001). Migrated from the deprecated
+# `[tool.uv] dev-dependencies`, which uv 0.11+ warns on and will remove.
+# Same packages, same constraints — a syntax migration only; uv installs the
+# `dev` group by default, so `uv sync` / `uv run` behave identically.
+[dependency-groups]
+dev = [
     "pytest>=8.3,<9",
     "pytest-asyncio>=0.23,<1",
     "pytest-cov>=5.0,<6",
@@ -63,6 +67,32 @@ dev-dependencies = [
     "pre-commit>=3.8,<4",
     "aiofiles>=23.0,<25",
 ]
+
+# PyTorch CUDA 12.x build (M2.1.10 / DEBT-013).
+#
+# Without this, `torch` resolves from PyPI, whose default Windows wheel is the
+# CPU-ONLY build (torch==X.Y.Z+cpu, torch.cuda.is_available() == False). A
+# .venv rebuild silently did exactly that, which left faster-whisper unable to
+# load cublas64_12.dll and took the entire voice pipeline offline while every
+# dependency still "resolved successfully" — a failure with no loud symptom
+# until STT is actually invoked.
+#
+# cu126 is the CUDA 12.x index, matching AETHER_V1_TECHNICAL_SPECIFICATION.md
+# Section 12's "CUDA Toolkit 12.x" requirement. It is also the only 12.x index
+# publishing torch 2.12.x / torchaudio 2.11.x for cp312 on win_amd64 (verified
+# against the index directly: cu121/cu124/cu128/cu129 do not). CUDA 12.6 wheels
+# are forward-compatible with the installed 13.3 driver.
+#
+# `explicit = true` confines this index to the packages mapped below, so no
+# other dependency is silently resolved from it.
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchaudio = { index = "pytorch-cu126" }
 
 [tool.ruff]
 line-length = 100
@@ -132,6 +162,15 @@ include_external_packages = true
 name = "Memory module boundary: no external DB access"
 type = "forbidden"
 allow_indirect_imports = true
+# aether.tasks is deliberately NOT a source module of this contract (DEBT-017).
+# TaskManager (aether/tasks/manager.py) imports SQLAlchemy directly, by design:
+# Tasks are a separate domain, not a form of memory — they are actionable to-do
+# items, not recalled facts, and only share the physical database as
+# infrastructure. Aether's principle is "each domain has exactly one gatekeeper,"
+# not "only one module may touch SQL anywhere," so the Tasks domain owns its own
+# DB access just as Memory's _stores/ does for its domain. Do not add
+# "aether.tasks" here without amending that decision. See aether/tasks/manager.py
+# and V1_TECHNICAL_SPECIFICATION.md Section 2.9.
 source_modules = [
     "aether.agents",
     "aether.session",

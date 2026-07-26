@@ -8,9 +8,11 @@ import redis.asyncio as aioredis
 
 from aether.core.config import get_config
 from aether.core.events import EventBus
+from aether.memory.models import ConsolidationReport, ContextPackage
 from aether.session.manager import SessionManager
 from aether.session.models import SessionMode
 from aether.session.startup import SessionStartupBuilder
+from aether.tasks.models import Task, TaskFilter
 
 pytestmark = pytest.mark.integration
 
@@ -48,11 +50,12 @@ async def integration_setup() -> AsyncGenerator[
 
     # Mock MemoryAPI & TaskManager to bypass LLM and Qdrant in this integration test
     class MockTaskManager:
-        # NOTE: this mock's signature is stale — the real TaskManager.list takes
-        # `task_filter`, not `filter` (DEBT-006). M2.1.9 is lint/type only and
-        # must not change behavior, so the A002 finding is suppressed here and
-        # the stale signature is left for DEBT-006's own milestone to correct.
-        async def list(self, filter, limit):  # noqa: A002
+        # Mirrors the real TaskManager.list signature exactly (DEBT-006):
+        # `task_filter`, not `filter`, and both parameters carry the same
+        # defaults so callers that omit them behave identically. The previous
+        # `filter`/`limit` shape raised TypeError as soon as SessionStartupBuilder
+        # called it with the real keyword name.
+        async def list(self, task_filter: TaskFilter | None = None, limit: int = 50) -> list[Task]:
             return []
 
     class MockMemoryAPI:
@@ -63,10 +66,19 @@ async def integration_setup() -> AsyncGenerator[
         def __init__(self):
             self._llm_router = None
 
-        async def recall(self, query, k):
-            from aether.memory.models import ContextPackage
-
-            return ContextPackage(memories=[])
+        async def recall(self, query, k=10):
+            # Fully-formed ContextPackage: the locked model requires all six
+            # fields, and `ContextPackage(memories=[])` alone raised five
+            # "Field required" errors (DEBT-006). Matches the real recall()
+            # signature's `k` default too.
+            return ContextPackage(
+                memories=[],
+                total_found=0,
+                token_estimate=0,
+                formatted_context="",
+                retrieval_query=query,
+                retrieval_duration_ms=0,
+            )
 
         async def start_conversation(self, mode="voice"):
             import uuid_utils
@@ -87,8 +99,6 @@ async def integration_setup() -> AsyncGenerator[
                 correlation_id=session_id,
                 source="aether.memory",
             )
-            from aether.memory.models import ConsolidationReport
-
             return ConsolidationReport(
                 session_id=session_id,
                 memories_created=1,

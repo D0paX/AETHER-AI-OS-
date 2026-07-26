@@ -62,6 +62,11 @@ class VoiceConfig(BaseModel):
     """Configuration for the speech-to-text and text-to-speech pipelines."""
 
     enabled: bool = True
+    # Picovoice Porcupine wake-word access key. Sourced from
+    # AETHER_VOICE__PORCUPINE_ACCESS_KEY (env or .env). None when unset; the
+    # voice service validates it at startup and refuses to run the wake word on
+    # a missing or placeholder value (M2.1.10 Part 2 / DEBT-018, D-002).
+    porcupine_access_key: str | None = None
 
 
 class TaskConfig(BaseModel):
@@ -133,6 +138,15 @@ class AetherConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="AETHER_",
         env_nested_delimiter="__",
+        # M2.1.10 Part 2: load .env from disk. This was omitted from Milestone
+        # M1.2's original config.py (a specification gap, not a regression) — so
+        # values documented in .env / .env.example (e.g.
+        # AETHER_VOICE__PORCUPINE_ACCESS_KEY) never reached settings resolution,
+        # only real process environment variables did. See also the dotenv
+        # source added to settings_customise_sources below, which the same gap
+        # had left out of the source chain.
+        env_file=".env",
+        env_file_encoding="utf-8",
         yaml_file=["config/default.yaml", "config/local.yaml"],
         yaml_file_encoding="utf-8",
         extra="ignore",
@@ -165,10 +179,19 @@ class AetherConfig(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """Configure settings sources to include YAML parsing."""
+        """Configure settings sources to include YAML parsing.
+
+        Precedence (highest first): explicit init args, then real process
+        environment variables, then the .env file, then YAML defaults, then
+        file secrets. dotenv_settings must be listed explicitly: overriding
+        this method replaces pydantic-settings' default chain entirely, and the
+        original M1.2 implementation dropped it — so even with env_file set, the
+        .env file was never actually consulted (M2.1.10 Part 2).
+        """
         return (
             init_settings,
             env_settings,
+            dotenv_settings,
             YamlConfigSettingsSource(settings_cls),
             file_secret_settings,
         )
