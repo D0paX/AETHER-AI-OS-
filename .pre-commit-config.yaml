@@ -1,20 +1,55 @@
+# All hooks run through the project environment via `uv run` (language: system),
+# never through pre-commit's own isolated environments. This is deliberate
+# (DEBT-015): isolated hook envs drift from the project's real toolchain and
+# then measure themselves instead of the code. Every hook below mirrors the
+# corresponding gate in .github/workflows/, so local and CI results agree.
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
-
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.11.2
-    hooks:
-      - id: mypy
-        additional_dependencies: [pydantic>=2.9]
-        args: [--strict]
-
   - repo: local
     hooks:
+      # ruff/ruff-format previously came from ruff-pre-commit pinned at v0.6.9
+      # while the project runs ruff 0.15.20. The stale hook reported 4 PT004
+      # errors the current ruff does not raise, and its formatter rewrote files
+      # into a shape `uv run ruff format --check` then rejected — the two
+      # formatters actively fought each other. Same class of defect as the mypy
+      # hook below; same fix.
+      - id: ruff
+        name: Lint (ruff --fix)
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+
+      - id: ruff-format
+        name: Format (ruff)
+        entry: uv run ruff format
+        language: system
+        types: [python]
+
+      # mypy runs through the project environment, not an isolated one
+      # (DEBT-015). The previous mirrors-mypy hook declared
+      # `additional_dependencies: [pydantic>=2.9]`, so pre-commit built an env
+      # containing ONLY pydantic and every other third-party import became
+      # unresolvable — ~50 phantom "Cannot find implementation or library stub"
+      # errors that failed essentially every commit, while the same check run
+      # properly reported zero. Using the real venv removes the hand-maintained,
+      # drift-prone dependency list entirely.
+      - id: mypy
+        name: Type Check (mypy --strict)
+        entry: uv run mypy aether/ services/ --strict
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      # KNOWN LIMITATION, not fixed — believed inherent (DEBT-015). This hook
+      # analyses the whole import graph (pass_filenames: false), but pre-commit
+      # stashes unstaged changes before running hooks. So a deliberately partial
+      # commit is validated against the COMMITTED versions of everything not
+      # staged, and can report violations the working tree has already fixed.
+      # Observed while committing subsystem-scoped groups on top of M1.9: it
+      # flagged `aether.session.manager -> sqlalchemy` (DEBT-001, long since
+      # fixed) while the working tree reported 3 kept / 0 broken. There is no
+      # clean fix — a whole-graph check cannot be meaningfully evaluated against
+      # a partial tree. Treat this hook as authoritative on whole-tree commits;
+      # on a partial commit, verify with `uv run lint-imports` directly.
       - id: import-linter
         name: Architecture Boundary Check
         entry: uv run lint-imports
@@ -22,8 +57,15 @@ repos:
         pass_filenames: false
         types: [python]
 
+      # Mirrors the three scoped checks in .github/workflows/ci.yml exactly
+      # (DEBT-015): destructive patterns are forbidden in aether/ and services/;
+      # in migrations/ only DROP TABLE / TRUNCATE are exempt, because Alembic
+      # downgrade() legitimately drops what upgrade() created; provider SDKs are
+      # confined to aether/llm/_providers/. Written in Python rather than
+      # `bash -c` because on Windows `bash` resolves to the WSL launcher, which
+      # fails when no distro is installed — Python is always present via uv.
       - id: forbidden-patterns
         name: Forbidden Pattern Scan
-        entry: bash -c 'grep -r "DROP TABLE\|TRUNCATE\|rm -rf\|flushall\|drop_all" aether/ services/ migrations/ --include="*.py" && exit 1 || exit 0'
+        entry: "uv run python -c \"import pathlib,sys;A=('DROP TABLE','TRUNCATE','rm -rf','flushall','drop_all');M=('rm -rf','flushall','drop_all');P=('import anthropic','import openai','import litellm','import google.generativeai');scan=lambda rs,ps,skip=None:[f'{p.as_posix()}:{i} {l.strip()}' for r in rs for p in pathlib.Path(r).rglob('*.py') if not (skip and p.as_posix().startswith(skip)) for i,l in enumerate(p.read_text(encoding='utf-8',errors='ignore').splitlines(),1) if any(x in l for x in ps)];h=scan(['aether','services'],A)+scan(['migrations'],M)+scan(['aether','services'],P,'aether/llm/_providers/');print(chr(10).join(h) if h else 'OK - forbidden-pattern scan clean');sys.exit(1 if h else 0)\""
         language: system
         pass_filenames: false

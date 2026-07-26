@@ -13,19 +13,35 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - run: uv sync
       - run: uv run lint-imports
+      # Both greps below mirror the import-linter contracts in pyproject.toml
+      # exactly. import-linter is the authority (it understands the import
+      # graph); these are fast text backstops that must agree with it. Where
+      # they disagreed, they produced false positives and encoded a second,
+      # contradictory architecture (DEBT-015).
       - name: Verify no direct DB access outside memory module
         run: |
-          if grep -r "qdrant_client\|sqlalchemy\|aiosqlite\|sqlite3" \
-            aether/agents/ aether/tools/ aether/tasks/ aether/session/ aether/interfaces/ \
-            --include="*.py" 2>/dev/null; then
-            echo "DATABASE ACCESS VIOLATION FOUND OUTSIDE MEMORY MODULE"
+          # Scope = the "Memory module boundary" contract's source_modules:
+          # aether.agents, aether.session, aether.interfaces. aether/tasks/ and
+          # aether/tools/ are deliberately NOT sources of that contract, so
+          # scanning them here contradicted the boundary tool — TaskManager
+          # owns its own persistence (see DEBT-017 for that exemption's own
+          # open question). Do not re-add them without amending the contract.
+          if grep -rn "qdrant_client\|sqlalchemy\|aiosqlite\|sqlite3" \
+            aether/agents/ aether/session/ aether/interfaces/ \
+            --include="*.py"; then
+            echo "::error::DATABASE ACCESS VIOLATION FOUND OUTSIDE MEMORY MODULE"
             exit 1
           fi
+          echo "OK: no direct DB access in agents/, session/, interfaces/"
       - name: Verify no direct LLM provider access outside llm module
         run: |
-          if grep -r "import anthropic\|import openai\|import litellm\|import google.generativeai" \
-            aether/agents/ aether/memory/ aether/tools/ aether/tasks/ aether/session/ \
-            --include="*.py" 2>/dev/null; then
-            echo "LLM PROVIDER ACCESS VIOLATION FOUND OUTSIDE LLM MODULE"
+          # Scope = the "LLM boundary" contract's source_modules: agents,
+          # memory, tools, tasks, session, interfaces. interfaces was missing
+          # here while the contract lists it — added so the two agree.
+          if grep -rn "import anthropic\|import openai\|import litellm\|import google.generativeai" \
+            aether/agents/ aether/memory/ aether/tools/ aether/tasks/ aether/session/ aether/interfaces/ \
+            --include="*.py"; then
+            echo "::error::LLM PROVIDER ACCESS VIOLATION FOUND OUTSIDE LLM MODULE"
             exit 1
           fi
+          echo "OK: no provider SDK imports in any contract source module"

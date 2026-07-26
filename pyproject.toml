@@ -52,8 +52,12 @@ aether = "aether.__main__:main"
 [tool.setuptools.packages.find]
 include = ["aether*", "services*"]
 
-[tool.uv]
-dev-dependencies = [
+# Dev dependencies in PEP 735 form (D-001). Migrated from the deprecated
+# `[tool.uv] dev-dependencies`, which uv 0.11+ warns on and will remove.
+# Same packages, same constraints — a syntax migration only; uv installs the
+# `dev` group by default, so `uv sync` / `uv run` behave identically.
+[dependency-groups]
+dev = [
     "pytest>=8.3,<9",
     "pytest-asyncio>=0.23,<1",
     "pytest-cov>=5.0,<6",

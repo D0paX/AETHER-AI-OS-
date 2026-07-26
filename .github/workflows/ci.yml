@@ -46,14 +46,43 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Scan for forbidden patterns
+      # Scoped per DEBT-015. The original single grep conflated three different
+      # rules over one path list, so it flagged code the architecture mandates:
+      # Alembic downgrade() DROP TABLE, and the litellm import that IS the
+      # approved provider abstraction. Each rule now carries its own scope; none
+      # is weakened — every pattern is still forbidden everywhere it was
+      # genuinely forbidden before.
+      - name: Destructive operations in application code
         run: |
-          if grep -r "DROP TABLE\|TRUNCATE\|rm -rf\|flushall\|drop_all\|import anthropic\|import openai\|import litellm" \
-            aether/ services/ migrations/ --include="*.py" 2>/dev/null; then
-            echo "FORBIDDEN PATTERNS FOUND"
+          if grep -rn "DROP TABLE\|TRUNCATE\|rm -rf\|flushall\|drop_all" \
+            aether/ services/ --include="*.py"; then
+            echo "::error::Destructive operation found in application code (ADR-010 Section 3)"
             exit 1
           fi
-          echo "Security scan passed"
+          echo "OK: no destructive operations in aether/ or services/"
+      - name: Destructive operations in migrations
+        run: |
+          # Alembic downgrade() legitimately drops what upgrade() created, so
+          # DROP TABLE / TRUNCATE are expected here and only here. Every other
+          # destructive pattern remains forbidden in migrations too.
+          if grep -rn "rm -rf\|flushall\|drop_all" \
+            migrations/ --include="*.py"; then
+            echo "::error::Destructive operation found in migrations/ (ADR-010 Section 3)"
+            exit 1
+          fi
+          echo "OK: no forbidden destructive operations in migrations/"
+      - name: LLM provider SDKs imported outside the provider layer
+        run: |
+          # ARCHITECTURE_RULES Rule 2: provider SDKs may be imported ONLY inside
+          # aether/llm/_providers/ — that wrapper is the model-agnostic
+          # abstraction. Anywhere else is a boundary violation.
+          if grep -rn "import anthropic\|import openai\|import litellm\|import google.generativeai" \
+            aether/ services/ --include="*.py" \
+            | grep -v "^aether/llm/_providers/"; then
+            echo "::error::LLM provider SDK imported outside aether/llm/_providers/"
+            exit 1
+          fi
+          echo "OK: provider SDKs confined to aether/llm/_providers/"
 
   unit-tests:
     name: Unit Tests
