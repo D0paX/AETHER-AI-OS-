@@ -492,4 +492,146 @@ Brought the whole tree to a clean gate baseline without changing behavior anywhe
 
 _Outcome:_ Every future edit now starts from a clean, enforced baseline instead of a 140-error one — and the pass itself surfaced two real, previously invisible defects in the voice stack that a noisy gate had been hiding.
 
+---
+
+### **Date:** 2026-07-17 7:10 PM
+
+**Milestone:** M2.1.10 (Voice Pipeline Restoration) — DEBT-013 and DEBT-014 closed; CUDA STT and VAD both genuinely restored and proven. The six-step Voice Milestone still cannot be run — a third, previously unknown blocker (DEBT-018) — so Level 10 is NOT claimed.
+
+**Engineering Notes:**
+Fixed the two compounding defects that had taken the voice pipeline entirely offline, and fixed them at the specification level rather than just in today's environment.
+
+- **CUDA torch, root-caused (DEBT-013):** `pyproject.toml` pinned a bare `torch>=2.0,<3` with no CUDA index, so any resolve takes PyPI's default Windows wheel — the **CPU-only** build. A `.venv` rebuild had done exactly that (`torch 2.12.1+cpu`, `torch.version.cuda = None`), and since `cublas64_12.dll` ships *only* inside the CUDA build's `torch/lib`, ctranslate2 had no cuBLAS to load. Nothing failed at install or import; it only surfaced inside the first real transcription. Fixed with uv's documented per-package index mechanism — `[[tool.uv.index]] name = "pytorch-cu126"` + `[tool.uv.sources]`, `explicit = true` so nothing else resolves from it.
+- **Choosing cu126 by verification, not assumption:** the prompt pointed at `windows-validation-log.md` for the exact CUDA version — but that log turns out to be an **unfilled template** (no date, every box blank), so M0's environment validation was evidently never actually performed. Ironically, its Block 6 is `torch.cuda.is_available() == True` — the very check that would have caught this. With no recorded version, I queried the PyTorch indexes directly: cu121/cu124/cu128/cu129 publish **no** torch 2.12+ for cp312/win_amd64; only **cu126** and cu130 do. cu126 is the CUDA 12.x index the V1 spec and setup doc call for, so cu126 it is. (The machine's local toolkit is actually CUDA 13.3, but that is irrelevant — the wheels bundle their own runtime and 12.6 wheels run fine on the newer driver.)
+- **VAD frame size, verified against the model itself (DEBT-014):** the milestone forbade assuming 512, so I swept the installed model: at 16kHz it rejects 160/256/320/**480** ("Input audio chunk is too short") and 640/768/1024/1536, accepting **only 512**. The model states its own contract verbatim — `Provided number of samples is N (Supported values: 256 for 8000 sample rate, 512 for 16000)`. The pipeline sliced to 480 (a 30ms estimate from an older Silero release), so every LISTENING frame raised. Now `VAD_FRAME_SAMPLES = 512`, a named constant, with `vad.py`'s docstring and V1 spec §9.2/§9.3 corrected to match reality.
+
+**Validation (all four requirements met):**
+- `torch.cuda.is_available()` → **True** (torch 2.13.0+cu126, `torch.version.cuda` 12.6).
+- **VRAM on Whisper load: 1494 → 3499 MiB (+2005 MiB)**, measured while holding the model rather than after release.
+- **VAD callback driven with real audio at the corrected size: 156 frames, 0 exceptions** (previously every frame raised), 87 detected as speech — and the pipeline advanced **LISTENING → TRANSCRIBING on its own**, meaning silence detection functioned for the first time.
+- **Fresh-environment `uv sync --extra voice` (dry-run into an empty venv) resolves `torch==2.13.0+cu126` / `torchaudio==2.11.0+cu126`**; `uv.lock` now records the cu126 registry with **zero** CPU-torch references. The root cause is locked, not just today's symptom.
+- The real service boots end-to-end to `voice_pipeline_ready state=IDLE` with `whisper_model_loaded device=cuda used_vram_gb=3.25`. Gates unchanged: ruff 0, format clean, mypy --strict 0, import-linter 3 kept/0 broken, 158 unit+contract tests pass.
+
+**Bug Fixes:**
+
+- **`uv sync` uninstalled the project's own editable install (found and repaired).** `pyproject.toml` declares no `[build-system]`, so uv treats the project as "virtual" and `uv sync` removed the `aether-os` editable install that had been placed manually at some earlier point — which broke `uv run pytest` with `ModuleNotFoundError: No module named 'aether'`. Restored with `uv pip install -e . --no-deps`. It also removed `en-core-web-sm`, which is referenced nowhere in the codebase (a stray manual install; harmless). **Worth noting as a reproducibility trap:** a fresh `uv sync` on a clean machine produces a venv where `uv run pytest` cannot import the project.
+
+**Findings — reported, deliberately not fixed:**
+
+- **DEBT-018 (P1) — the wake word cannot be armed by any documented means.** This is now the *sole* blocker to the Voice Milestone. Three defects compound: (1) `.env` holds the literal placeholder `AETHER_VOICE__PORCUPINE_ACCESS_KEY=your-porcupine-key-here` (no real key exists — D-002); (2) `pipeline.py` reads a **different variable entirely**, the bare `os.getenv("PORCUPINE_ACCESS_KEY")`; (3) nothing loads `.env` into `os.environ`, and `VoiceConfig` has no porcupine field at all. So a developer who follows `.env.example` exactly and pastes in a valid key **still gets a disabled wake word**, with only an INFO warning to explain it.
+- **Whisper is loaded twice on startup.** `main.py` explicitly loads vad/wake_word/tts/stt, then calls `pipeline.start()` which loads all four again — visible in the boot log as `used_vram_gb=3.25` followed by `3.68`. Two Whisper instances on a 6GB card is wasteful and an OOM risk. Out of this milestone's stated scope (torch + VAD), so reported only.
+- **`tests/fixtures/test_utterance.wav` is a bad fixture.** It is quiet (RMS −32.2 dBFS) and STT is **nondeterministic** on it — three consecutive runs of the identical file gave `'1, 0, 4, 3, 2, 1...'`, then `'My name is Apple, your name it is.'` twice (Whisper's temperature fallback on poor audio). Its content also does not match the test's own assertion (`hello`/`time`/`aether`). `test_stt_transcription` therefore still fails — but on the fixture, **not** on STT: the transcription itself now demonstrably works. This belongs to the fixture-cleanup milestone (DEBT-006) that M2.1.10 was sequenced ahead of.
+- **Debt register has a duplicate ID:** my DEBT-015 (CI greps) and a newer, Architect-authored DEBT-015 (consolidated tooling gaps, targeted M2.1.11) now coexist. The Architect's supersedes mine; renumbering/removing is theirs to decide, so my new entry took DEBT-018 rather than compound it.
+
+**Status:** M2.1.10's two named defects are fixed and proven — the voice pipeline is genuinely restored from "cannot transcribe at all" to "loads on CUDA, transcribes real speech, and drives its own state machine". Definition of Done Levels 1–9 are met. **Level 10 is NOT claimed, and M2.1.9's deferred Level 4 therefore remains deferred as well.** The six-step Voice Milestone still cannot be run, for two reasons stated plainly rather than worked around: (1) the wake word cannot arm (DEBT-018), so step 1 is unreachable by anyone, developer included; and (2) the sequence is inherently **manual and witnessed** — it requires a human to speak into a microphone and hear the reply, which I cannot do. Per NB-2 and this milestone's own rule, the sequence is not mocked, not substituted with component tests, and not declared "effectively passing". Everything measured above is offered as readiness evidence, explicitly not as a substitute.
+
+_Outcome:_ Aether's voice pipeline can hear again — CUDA STT restored and locked against the silent CPU-wheel regression that caused it, and the VAD processing every frame instead of raising on all of them. What stands between here and a witnessed Voice Milestone is one wire that was never connected: the wake-word key.
+
+---
+
+### **Date:** 2026-07-17 9:05 PM
+
+**Milestone:** M2.1.10 Part 2 (Wake Word Configuration Plumbing) — DEBT-018 closed at the code level; D-002 resolved via the config path. Completes M2.1.10's own scope. Level 10 for M2.1.10 as a whole is still NOT claimed — it needs a real Picovoice key (developer handoff) plus the witnessed Voice Milestone run.
+
+**Engineering Notes:**
+Fixed the configuration plumbing so a Picovoice key placed in `.env` under the project's standard naming convention actually reaches the code, and made a missing/placeholder key fail loudly at startup instead of booting to a silently deaf pipeline. This closes DEBT-018, which Part 1's own Voice Milestone attempt surfaced.
+
+- **`.env` was never loaded — two omissions, not one.** The prompt correctly identified that `AetherConfig`'s `SettingsConfigDict` was missing `env_file=".env"` (a specification omission from Milestone M1.2's original config.py, **not** a regression). But adding that alone would not have worked: the custom `settings_customise_sources` receives `dotenv_settings` and **dropped it from the returned source tuple** — a second, deeper instance of the same M1.2 omission. Overriding that method replaces pydantic-settings' entire default source chain, so the dotenv source has to be listed explicitly. Fixed both; `dotenv_settings` now sits between real-env and YAML, giving precedence init > env > `.env` > yaml > secrets (a real exported var still wins over the file, as convention expects).
+- **`VoiceConfig.porcupine_access_key: str | None = None`** added — the field never existed, so even a correctly-loaded `.env` had nowhere to land.
+- **`pipeline.py` no longer bypasses config.** The bare `os.getenv("PORCUPINE_ACCESS_KEY", "dummy_key_if_not_provided")` (which read a *different variable name* than `.env.example` documents) is gone — `grep -rn "os.getenv(.PORCUPINE" services/` returns zero. It now reads `get_config().voice.porcupine_access_key`, populated by the documented `AETHER_VOICE__PORCUPINE_ACCESS_KEY`. The now-unused `import os` was removed to keep ruff clean. This import of `aether.core.config`/`aether.core.exceptions` is fine under the Services boundary contract (which forbids only `aether.memory._stores`, `aether.llm._providers`, `qdrant_client`, `sqlalchemy`) and matches how `main.py` already reads config.
+- **Loud failure.** `VoicePipeline.__init__` now raises `VoiceError` (`error_code="VOICE_PORCUPINE_KEY_MISSING"`, from the AetherError hierarchy in `aether/core/exceptions.py` — not the stray bare-`Exception` duplicate in `services/voice/models.py`) when the key is missing, empty, or equals the `.env.example` placeholder. That is an unhandled exception at boot, replacing the old quiet `porcupine_wake_word_disabled` INFO line. The message names the fix (console.picovoice.ai, the exact env var) and **never echoes the configured value**, even when reporting it equals the placeholder. The placeholder literal is a named constant (`PORCUPINE_KEY_PLACEHOLDER`) with a comment tying it to `.env.example`.
+
+**Validation (all requirements met):**
+- Set `AETHER_VOICE__PORCUPINE_ACCESS_KEY=test-value-12345` in a temp `.env` → `config.voice.porcupine_access_key` resolves to exactly that string.
+- Set it to the exact placeholder → `VoicePipeline.__init__` raises the actionable `VoiceError`, and the message does **not** contain the placeholder value.
+- `grep -rn "os.getenv(.PORCUPINE" services/` → zero matches.
+- Security: confirmed the key value is passed to no logger/print anywhere in `services/` or `aether/`.
+- Tests: 4 config-resolution (`tests/unit/test_config.py`) + 5 loud-failure (`tests/integration/test_wake_word_config.py`) = 16 relevant tests pass (the 11 in test_config.py include the pre-existing 7). Gates: ruff 0, format 0, mypy --strict 0, import-linter 3 kept/0 broken. Regression: unit+contracts **162 passed** (was 158, +4 new config tests) — the additive `env_file` change broke nothing, proven not assumed (incl. an explicit test that all other sections still resolve with `.env` loading active, and confirmation the repo's real `.env` — `AETHER_ENVIRONMENT=development`, two API keys, the placeholder — still loads cleanly).
+
+**Status:** M2.1.10 Part 2's own scope is complete and proven; DEBT-018's three compounding code defects are all fixed and D-002 is satisfied via the standard config path (env/`.env`, the same mechanism the Anthropic and Google keys use — not a graphical UI, which would be inconsistent with the project's config philosophy). **Level 10 for M2.1.10 as a whole is still not claimed, and M2.1.9's deferred Level 4 with it:** the six-step Voice Milestone requires a real Picovoice key that only the developer can supply, plus a human at a microphone to witness it. Per NB-2 that run is not mocked or declared "effectively passing" — the wiring is proven with a test value, exactly as this milestone scoped.
+
+_Outcome:_ The last wire is connected. A developer can now put a real Picovoice key in `.env` the way the docs always implied would work, and the wake word will arm — or, if the key is missing, Aether will say so loudly at startup instead of pretending to listen. The handoff is now a single human action away from the first witnessed end-to-end conversation.
+
+---
+
+### **Date:** 2026-07-18 1:40 PM
+
+**Task:** Tooling & CI Configuration Cleanup (D-001, DEBT-015) — config and tooling only, zero application code changed. Both closed.
+
+**Engineering Notes:**
+Made the automated gates measure the code instead of themselves.
+
+- **D-001:** migrated `[tool.uv] dev-dependencies` → `[dependency-groups] dev` (uv 0.11.15 supports PEP 735). Proven syntax-only: uv.lock byte-identical, 399 packages unchanged, and the deprecation warning on every `uv run` gone.
+- **CI scans re-scoped:** one grep had conflated three unrelated rules over a single path list. Split into three — destructive patterns forbidden in `aether/`+`services/`; in `migrations/` only DROP TABLE/TRUNCATE exempt, since Alembic `downgrade()` legitimately drops what `upgrade()` created; provider SDKs confined to `aether/llm/_providers/`. The boundary grep now matches the import-linter contract exactly (`agents`, `session`, `interfaces` — deliberately not `tasks`/`tools`), read from the contract rather than guessed.
+- **Pre-commit moved onto the project toolchain:** the mypy hook's isolated env held only pydantic, producing ~50 phantom missing-stub errors that failed nearly every commit. `ruff`/`ruff-format` had the same defect — pinned at v0.6.9 against the project's 0.15.20, with the stale formatter rewriting a file the real one then rejected. All converted to `uv run`.
+- **Security, both directions:** each narrowed scan was tested by injecting a genuine violation at a real path — **5 caught, 0 missed**, every probe file removed and verified gone.
+
+_Outcome:_ `pre-commit run --all-files` passes all five hooks — the first green run in the project's history. Red used to carry no information; now green means green, and every scan is proven to still bite.
+
+---
+
+### **Date:** 2026-07-21 4:10 PM
+
+**Task:** Stale Test Fixtures and Script Robustness (DEBT-006) — four files, all predating this remediation arc. Closed.
+
+**Engineering Notes:**
+Corrected two test fixtures against the locked contracts and fixed the two scripts that had needed manual bypass since M2.1.
+
+- **`test_task_workflow.py` was far staler than the brief** — nine constructs, not one: `AgentTask(instruction=...)`, a `ContextPackage` that was never the agent's context type, `AgentDecision(tool_calls=)`, `create_task()`/`list_tasks()`, `result.output`, an LLM mock carrying `.usage`, `priority="NORMAL"` (never existed), and a `select()` against the Pydantic model.
+- **No assertion was weakened.** Assertions now go through TaskManager's public API, testing the locked `TaskStatus` enum rather than the lower-cased string the manager happens to persist; the completion test moves PENDING → ACTIVE → COMPLETED because the locked state machine forbids the direct jump the old test attempted.
+- **`test_event_flow.py`:** the mock's `list(self, filter, limit)` now mirrors the real `task_filter`/`limit` signature — the defect M2.1.5 identified and left — which then exposed a second stale construct, `ContextPackage(memories=[])` missing five required fields.
+- **`start.ps1`/`stop.ps1` root cause:** `$ErrorActionPreference = "Stop"` plus native `docker compose`, whose *normal* progress output goes to **stderr** — PowerShell 5.1 turns each such line into a terminating error, so a fully successful `up -d` killed the script mid-success. Now judged on **exit code**; both ran end to end, exit 0, unattended, with all data volumes preserved on stop.
+- **DEBT-011 narrowed:** the corrected tests reach code the broken ones never did, exposing the access violation at **two tests in one process** — the trigger is repeated embedding-model/kernel initialization within one pytest process. A module-scoped fixture removed it: a mitigation, **not** a fix. DEBT-011 stays open.
+
+_Outcome:_ The tests now assert the architecture the code actually has, and the scripts run unattended for the first time since M2.1 — plus DEBT-011 went from "the suite crashes, somehow" to a specific, reproducible trigger.
+
+---
+
+### **Date:** 2026-07-25 6:30 PM
+
+**Task:** Windows Full-Suite Crash Investigation (DEBT-011) — investigation, no code change. Closed as resolved-by-DEBT-013 and verified.
+
+**Engineering Notes:**
+Re-tested the full-suite access violation against the now-correct CUDA environment. **It does not reproduce** — and no fix was needed, because the DEBT-013 torch fix (M2.1.10 Part 1) had already resolved it.
+
+- **Ran the full integration suite as one invocation, four consecutive times** (not the file-by-file workaround): all 29 tests collected and ran to completion every time, **zero access-violation signatures** in any run. Runs: 27p/2f in 15m38s, then 28p/1f in ~2m19s ×3 (the first run was slow only because it downloaded the models).
+- **The two non-crash failures were characterised and dismissed:** run 1's consolidation failure was a transient HuggingFace CDN timeout downloading `bge-large-en-v1.5` (didn't recur once cached); `test_stt_transcription` fails on the known bad `test_utterance.wav` fixture, not on STT. Neither is the crash.
+- **Directly confirmed the previously-crashing path.** The DEBT-006 finding (under CPU torch) was that the *second* embedding-model init in one process crashed. A minimal reproducer — four `EmbeddingService` loads in one process under CUDA torch — completed cleanly (dim 1024 each, exit 0). The exact operation that faulted before now survives.
+- **Root cause, honestly bounded:** the only relevant change between the crashing and clean states is the torch build (`2.12.1+cpu` → `2.13.0+cu126`), so the crash was an artifact of the broken CPU-only wheel. A DLL/ABI mismatch is the plausible mechanism, but since the crash no longer reproduces there is no live traceback to dissect — stated as hypothesis, not proven.
+
+_Outcome:_ DEBT-011 closed. The file-by-file workaround from M2.1.7–M2.1.10 can be retired — the full suite runs in one invocation. Original resolution plan guessed torch-multiprocessing/GPU contention; the real cause was the same broken environment as DEBT-013, resolved by that fix.
+
+---
+
+### **Date:** 2026-07-25 7:05 PM
+
+**Task:** TaskManager Exemption Documentation (DEBT-017) — documentation only, no behavior change.
+
+**Engineering Notes:**
+Recorded, in the same rationale across all three places a reader might meet it, why `aether/tasks/manager.py` may import SQLAlchemy directly when the "Memory module boundary" contract forbids it for everyone else.
+
+- **Rationale (as reasoned by the Architect, transcribed not reinvented):** Tasks are a separate domain, not a form of memory — actionable to-do items, not recalled facts — sharing the physical database only as infrastructure. Aether's principle is "each domain has exactly one gatekeeper," not "only one module may touch SQL anywhere," so the Tasks domain owns its DB access just as Memory's `_stores/` does, provided nothing reaches around TaskManager to touch the `tasks` table directly.
+- **Three locations, one story:** a module docstring in `manager.py`; a comment directly above the contract's `source_modules` in `pyproject.toml` (where `aether.tasks` is intentionally omitted); and V1_TECHNICAL_SPECIFICATION.md §2.9.
+- **Scope held:** documentation only — no structural refactor. DEBT-017's optional private-store/public-manager split stays open (opportunistic); the exemption half is now done.
+
+_Outcome:_ ruff 0, format clean, mypy --strict 0, import-linter 3 kept / 0 broken — the passing contract confirms the documented exemption is real. A future reader hitting the direct SQLAlchemy import now finds the reason at the code, at the contract, and in the spec, instead of mistaking it for a boundary violation.
+
+---
+
+### **Date:** 2026-07-25 7:28 PM
+
+**Milestone:** M2.1.12 (Retrieval Resilience — Fallback Matching and Rerank Weighting) — DEBT-012 closed. The read-side counterpart to DEBT-009's write-side fix; the full mandatory regression passes.
+
+**Engineering Notes:**
+Two retrieval defects, each reproduced against a real store before any code was written.
+
+- **FTS fallback loosening (`hybrid.py`).** With Qdrant momentarily down, keyword search is the only route, but FTS5's implicit AND can't match a question to its declarative answer ("What is my name?" vs "The user's name is Jordan."). Fix: on the vector-failed fallback only, strip question/function stop-words, leaving content words ("name") the fact contains. Chose stop-word removal over FTS5 `OR`-syntax deliberately — OR-syntax would corrupt the production pg_trgm path; a plain content-word string is dialect-agnostic. Normal path (vector up) untouched.
+- **Categorical FACT boost (`reranker.py`).** The 0.6/0.3/0.1 formula let a merely-similar episode outrank a high-importance FACT. Fix: a uniform `FACT_SCORE_BOOST = 0.15` on every FACT — bounded, so it wins at comparable similarity but can't let an irrelevant FACT (sim 0.05) displace a highly-relevant episode (sim 0.95).
+
+**Mandatory regression — full, not sampled, all passing:** M1.5 `test_cross_session_memory_persistence` (unmodified — passes with Qdrant up, which the fix leaves alone; not weakened); all 3 M2.1.8 fact-capture tests; 4 new fallback tests + 2 new reranker tests; 168 unit+contracts+architecture. Gates: ruff 0, format clean, mypy 0, import-linter 3 kept/0 broken. `recall()` signature unchanged.
+
+**Flag for the Architect:** the full-suite one-invocation regression **segfaulted once** — the intermittent DEBT-011 native fault, which pure-Python changes can't cause. DEBT-011's "resolved" status is optimistic; I ran the named-critical regression file-by-file (all passed) and recommended, under DEBT-011, reopening it as "intermittent, mitigated by file-by-file" — the Architect's call, not reopened unilaterally.
+
+_Outcome:_ A stored fact is now reliably retrievable when Qdrant hiccups, and a high-importance fact is no longer buried by a chattier episode — the read-side half of the promise DEBT-009 fixed on the write side.
+
 _(End of current log. Subsequent entries will be appended upon the completion of future milestones.)_

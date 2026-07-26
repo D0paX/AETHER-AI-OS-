@@ -560,3 +560,233 @@ Both were **reported, not fixed.** This milestone's one rule was "change no beha
 That's the real payoff here. With 140 warnings on the floor, two genuinely broken things in the voice stack looked like just more clutter. Clean the floor, and they're impossible to miss.
 
 ---
+
+## Milestone 2.1.10 (M2.1.10): Teaching Aether to Hear Again
+
+*Status: The two things that had made Aether completely deaf are fixed and proven. But we found a third problem — one wire that was never connected — so the full "talk to Aether" test still can't be run.*
+
+Last milestone ended with an uncomfortable discovery: Aether's voice system was completely non-functional, and had been for a while without anyone noticing. This milestone fixes it. Two separate faults were stacked on top of each other.
+
+### Problem 1: Aether's ears were installed without the GPU part
+
+Aether uses the graphics card to understand speech quickly. But the project's setup file just said "install PyTorch" without specifying *which* version. There are two: a GPU one and a CPU-only one — and the CPU-only one is what you get by default. At some point the environment was rebuilt, quietly picked the default, and the GPU support vanished.
+
+Here's what makes this the nastiest kind of bug: **nothing looked wrong.** Everything installed successfully. Everything imported successfully. The failure only appeared deep inside the moment Aether actually tried to understand speech — and since no automated test ever exercised that, nobody found out.
+
+**What we did:** pinned the setup file to the correct GPU version, using the package manager's official mechanism. Crucially, we fixed the *recipe*, not just this one kitchen — a fresh install on a brand-new machine now gets the GPU version automatically. We proved it by simulating a clean install and watching it choose correctly.
+
+### 🧠 The interesting part: we couldn't just look up the right answer
+The instructions said "check the environment validation log for the exact CUDA version we standardised on." We opened it and found... a blank form. Date: `_______`. Every checkbox untouched. **The environment validation was never actually done.**
+
+There's real irony here: that form's Block 6 is literally the check `torch.cuda.is_available() == True` — the exact test that would have caught this problem at the very beginning.
+
+So instead of trusting a document, we asked the software directly: we queried PyTorch's servers to see which versions actually exist for this exact Python and Windows combination. Most candidates had nothing suitable. Exactly one CUDA 12 option did. That's the one we used — chosen from evidence, not from a document that turned out to be empty.
+
+### Problem 2: Aether was handing its ears the wrong-sized pieces of sound
+
+Aether uses a small model to tell "is someone speaking right now?" That model demands audio in chunks of exactly **512 samples**. The code was slicing them to **480** — a figure from an older version of that model. So *every single chunk* was rejected. The part of Aether that decides "you've stopped talking, let me reply now" had never once worked.
+
+We were explicitly told not to assume 512 was right just because it seemed to work. So we tested every plausible size against the actual installed model. It rejected 160, 256, 320, and 480 as too short, rejected 640 and above as unsupported, and accepted only 512. The model even spells out its own rule in its error message: *"Supported values: 256 for 8000 sample rate, 512 for 16000."* Now it's 512, written as a clearly-named value rather than a mystery number.
+
+### How we proved it's genuinely fixed:
+- The GPU is recognised again, and loading the speech model visibly consumes **2GB of graphics memory** — we watched the number climb.
+- Aether transcribed real recorded speech, on the GPU. Before, this was impossible.
+- We fed 5 seconds of real speech through the actual listening code: **156 chunks, zero errors** (previously: every single one failed). Better still, Aether noticed the speech ended and moved itself to the "now transcribe it" step **on its own** — something it had never managed before.
+- The whole voice service now starts up cleanly and reports itself ready.
+
+### 💡 The honest finding (why we still can't do the real test):
+The real test is: say "Aether", ask it something, hear it answer. **We still can't run it** — and this time it's a third, separate problem we uncovered.
+
+To wake up when you say its name, Aether needs an access key from the company that makes the wake-word detector. Three things are broken at once:
+1. **There's no real key** — the file just contains the placeholder text `your-porcupine-key-here`.
+2. **The code looks for the key under a different name** than the one the setup instructions tell you to use.
+3. **Nothing actually loads that file** into the place the code checks anyway.
+
+The punchline: even if you signed up, got a real key, and pasted it in exactly where the instructions say — **it still wouldn't work.** The documented setup path leads nowhere. That's now written down (DEBT-018) as the single remaining thing standing between us and a working conversation with Aether.
+
+We deliberately did **not** fix it here. This milestone was scoped to the two faults above, and the rules are explicit that a milestone's defining test is never faked or declared "close enough". So we're saying it plainly: everything except the wake-up word is proven working; the wake-up word cannot be switched on by anyone right now; and the final test genuinely needs a human to speak into a microphone and listen — which is not something we can do on your behalf.
+
+---
+
+## Milestone 2.1.10 Part 2 (M2.1.10-P2): Connecting the Last Wire
+
+*Status: The wake-word key can finally be configured the way the instructions always implied. One human step remains — getting a real key — before the first real conversation.*
+
+Part 1 restored Aether's ability to hear (GPU speech recognition) and fixed the "am I still talking?" detector. But when we tried the full "say Aether, ask it something" test, we hit a wall: the wake-word — the very first step — couldn't turn on. This part fixes that.
+
+### The problem: a key with three broken links in its chain
+To wake up when you say its name, Aether needs an access key from the company that makes the wake-word detector. The instructions told you to put that key in a file called `.env`. But following those instructions did nothing, because of three separate faults stacked on top of each other:
+
+1. **Aether never read the `.env` file at all.** The setting that says "also load values from `.env`" was simply never switched on — an omission from the project's very first configuration work. And when we went to switch it on, we found a *second*, subtler version of the same omission hidden one layer deeper, which would have made the first fix do nothing on its own. Both are now fixed.
+2. **There was no slot for the key to go into.** Even once the file was read, the configuration had no defined place to hold a Porcupine key. Added.
+3. **The code was looking under the wrong name.** The instructions said to set `AETHER_VOICE__PORCUPINE_ACCESS_KEY`, but the code was quietly checking a *different* name entirely. Now they match.
+
+The punchline from Part 1 stands vindicated: a developer who did everything right would still have failed. Now they won't.
+
+### 🔊 Making it fail loudly instead of silently
+Before, if the key was missing, Aether printed one quiet, easy-to-miss line and carried on pretending to listen — a system that looks fine but silently does nothing. We changed that. Now, if the key is missing, empty, or still the placeholder text, Aether **stops at startup with a clear error** that tells you exactly what to do: get a key from console.picovoice.ai, set this specific variable, restart.
+
+### 🔒 A small but important security detail
+The error message tells you the key is wrong — but it **never prints the key itself**, not even when the "wrong" value is the harmless placeholder. We made a point of proving the key value is never handed to any log anywhere. Secrets don't belong in log files, ever, even by accident.
+
+### How we proved it works (without a real key):
+- Put a test value in a `.env` file → Aether read it back correctly.
+- Set it to the placeholder → Aether refused to start, with the right message, and the message did not leak the value.
+- Searched the whole voice service for the old sneaky shortcut → gone, zero traces.
+- Re-ran the full configuration test suite → everything still works; switching on `.env` loading broke nothing.
+
+### 💡 The honest finding (what's left):
+This is deliberately **not** the finish line, and we're not pretending it is. Two things still stand between here and Aether actually holding a conversation:
+1. **A real key.** Only the developer can sign up at Picovoice and get one — that's not something we can or should do. Once it's in `.env`, the wake word will arm.
+2. **A human.** The final test is inherently physical: someone has to say "Aether" into a microphone and hear it answer. The rules are strict that this test is never faked or waved through with stand-ins, so we haven't.
+
+Everything that *can* be proven with a stand-in test value, is. The plumbing is done and watertight. The last two steps are yours.
+
+---
+
+## Tooling & CI Cleanup (D-001, DEBT-015): Making the Alarms Trustworthy
+
+*Status: Complete. For the first time, Aether's automated safety checks pass on correct code — which means a failure now actually means something.*
+
+This wasn't a feature. It was fixing the smoke detectors.
+
+Aether has automated "gates" that run before every save and on every upload: they check code style, types, architecture rules, and scan for dangerous commands like "delete this database table." The problem: **they had been failing on perfectly correct code since the very beginning.** Every commit, every push, red.
+
+That sounds cosmetic. It isn't. A smoke detector that shrieks constantly gets ignored — and then it can't tell you about a real fire. That's exactly what happened here: an earlier investigation found a genuinely broken commit that nobody had acted on, almost certainly because its failure looked identical to the permanent background of red.
+
+### What was actually wrong:
+1. **The dangerous-command scanner couldn't tell context from crime.** It flagged database "drop table" commands inside *undo* scripts — where dropping a table is precisely the point — and flagged the one file that's *supposed* to talk to the AI vendors, which is the whole reason that file exists.
+2. **Two rulebooks disagreed.** A proper architecture tool (which understands how code actually connects) said the code was fine. A crude text search said it was broken. They were enforcing two different architectures. We read the real rulebook and made the text search match it — rather than guessing.
+3. **The type-checker was grading an empty room.** It ran in an isolated sandbox containing exactly one of the project's ~400 libraries, so it reported ~50 errors of the form "I've never heard of this library." Run properly, the same check reported zero problems. It was measuring its own emptiness.
+4. **(Found mid-task) The style checker was three years out of date** — pinned to an old version that enforced a rule the current one has dropped, and whose auto-formatter *rewrote a file into a shape the project's own formatter then rejected.* Two formatters fighting each other over the same file.
+
+### What we did:
+Pointed every check at the project's real toolbox instead of its own private one, and scoped each scan to exactly what it's meant to police — no more, no less. Also modernized how development tools are declared (D-001), proving it changed nothing: the resolved package list was **identical, all 399 of them**, and the lock file was byte-for-byte the same.
+
+### 🔒 The part that mattered most: proving we didn't just mute the alarms
+Narrowing a security scan is dangerous. It's trivially easy to "fix" a false alarm by quietly disabling the whole detector. So the rule was: prove it **both ways.**
+
+For every scan we narrowed, we deliberately planted a *real* violation where it should still be caught — a genuine "drop table" in application code, a truly forbidden command inside the undo scripts, a vendor library imported somewhere it has no business being. **All five were caught. Zero slipped through.** Then we deleted every planted file and verified none were left behind.
+
+That's the difference between fixing a false alarm and unplugging the detector.
+
+### 💡 The honest finding (one thing we deliberately did not fix):
+One check — the architecture boundary check — genuinely cannot work correctly when you commit only *part* of your work. It examines how the whole codebase connects, but the tool that runs it temporarily hides your unsaved changes first. So it ends up judging a half-old, half-new version of reality and can report problems you've already fixed.
+
+We couldn't find a clean fix, and we don't think one exists: a whole-picture check can't be meaningfully run against a partial picture. So instead of pretending, we wrote the explanation directly into the config file where the next person will read it, with instructions for what to run instead. Some problems are best solved by documenting them honestly rather than papering over them.
+
+---
+
+## Stale Fixtures & Script Robustness (DEBT-006): Fixing Tests That Tested a Fantasy
+
+*Status: Complete. Two long-broken test files now check the real Aether, and the start/stop scripts finally run by themselves.*
+
+Some of Aether's tests had been failing for months — not because Aether was broken, but because the tests described a version of Aether that no longer existed. Think of a building inspector working from blueprints of a house that was remodelled years ago: every note they write is wrong, and eventually everyone learns to ignore the inspector.
+
+### The tests that described a fantasy
+One test file was checking for things that had all been renamed or restructured long ago: it asked Aether to do work using an old instruction format, called functions by names that don't exist (`create_task` when the real one is `create`), read results from a field called `output` when it's actually `response`, and used a task priority level ("NORMAL") that has never existed. Nine separate mismatches in one file.
+
+We rewrote it to match how Aether genuinely works today — **without softening a single check**. That distinction matters. The easy way to make a failing test pass is to lower the bar until it clears. We did the opposite: where Aether's rules were stricter than the test assumed, we followed Aether's rules.
+
+Two examples:
+- Aether stores task status in lowercase internally but presents it as a proper labelled value. We check the *presented* value, because that's the promise Aether makes. Checking the internal storage format would test a detail that's free to change.
+- Aether refuses to jump a task straight from "pending" to "completed" — it must pass through "active" first, deliberately. The old test tried to jump. Rather than removing that safety rule, we made the test respect it.
+
+### The scripts that cried wolf
+`start.ps1` and `stop.ps1` — the scripts that bring Aether's databases up and down — had needed manual babysitting for months. The cause turned out to be a classic Windows gotcha: **Docker prints its normal progress updates to the "error" channel**, not the "output" channel. Messages like "Container aether-redis Started" — perfectly good news — arrive on the same channel used for genuine errors. The scripts were configured to abort at the first sign of anything on that channel, so a completely successful startup killed itself partway through announcing its own success.
+
+The fix: judge success by the **exit code** — the one signal a program uses to actually report whether it worked — rather than by whether it printed anything. Both scripts now run start to finish unattended. We ran each one fully, end to end, to prove it: containers started, all health checks green, and on shutdown every container removed with all data volumes intact.
+
+### 💡 The unexpected payoff: a long-standing mystery got much smaller
+Aether has had a nasty, vague problem on record: running the whole test suite at once crashes Python outright with a low-level memory error. Nobody knew why; the workaround was to run tests one file at a time.
+
+Because our corrected tests now actually *reach* the heavy AI machinery (the broken versions crashed on bad field names long before getting there), the crash showed up much earlier — and that made it possible to pin down. **Two tests in one run were enough to trigger it.** The specific culprit: loading the AI text-understanding model *a second time* inside the same run reliably crashes.
+
+That turned "the suite crashes, somehow" into a precise, reproducible cause. We also demonstrated a mitigation — load it once per file instead of once per test, which removed the crash and made that file faster.
+
+But we did **not** declare the bug fixed, and we deliberately left the same latent problem alone in another file. The underlying crash is still there; we've only stopped poking it in one place. It stays on the register as an open item, now with a real lead instead of a shrug.
+
+---
+
+## Windows Full-Suite Crash Investigation (DEBT-011): The Bug That Fixed Itself
+
+*Status: Complete. The crash that forced tests to be run one file at a time no longer happens — it was cured, unknowingly, by an earlier fix.*
+
+For months, Aether's full test suite couldn't be run all at once on Windows: doing so crashed Python outright with a low-level memory error. The workaround was to run the tests one file at a time, every single time. It was a persistent tax on every milestone.
+
+This task was pure detective work: **is it still broken now that we fixed the GPU library problem back in the voice-restoration milestone?** The rule for the investigation was strict — no guessing, no "plausible-sounding" fixes. Only run it, watch what actually happens, and conclude from evidence.
+
+### What we found: it's gone
+We ran the entire suite in one shot, **four times in a row.** Every time, all 29 tests ran start to finish with zero crashes. Then, to be certain we were actually testing the thing that used to crash, we reproduced the exact trigger in isolation — loading the AI text-understanding model repeatedly in one process, which reliably crashed before — and it now completes cleanly.
+
+So the crash is genuinely resolved. And here's the satisfying part: **we didn't fix it in this task.** It was already fixed, as an unnoticed side effect of a completely different repair two milestones ago.
+
+### Why this happened
+Recall the voice-restoration work: the project's environment had quietly installed a broken, CPU-only version of a core AI library (PyTorch), and we replaced it with the correct GPU build. It turns out that same broken library was *also* the cause of this crash. Two symptoms, one disease. Cure the disease for one reason, and the other symptom vanishes too — we just didn't know it at the time.
+
+### 🧠 Knowing the limit of what you've proven
+The honest, slightly unsatisfying part: we can say *what* fixed it (the correct library build) with high confidence, because that was the only relevant thing that changed between "crashes reliably" and "never crashes across four runs." But we **cannot** dissect exactly *why* the broken library crashed at that low level — because there's no longer a crash to examine. You can't autopsy a patient who recovered.
+
+So we wrote it down that way: the cause is established by before-and-after evidence; the deeper mechanism (likely a mismatch between the broken library and its neighbours) is labelled a hypothesis, not a proven fact. That distinction matters. Claiming we'd proven the mechanism, when all we'd proven was the cure, would be exactly the kind of confident overreach this whole remediation arc has been correcting.
+
+### The payoff:
+The file-by-file workaround can be retired. The full suite is a single command again — and the old resolution plan, which guessed the cause was some Windows threading quirk, was simply wrong. The real answer was the same broken environment we'd already fixed for a different reason.
+
+---
+
+## TaskManager Exemption Documentation (DEBT-017): Writing Down the "Why"
+
+*Status: Complete. A deliberate exception to the rules is now explained everywhere someone might question it.*
+
+Aether has a strict rule: only the memory system is allowed to talk to the database directly. Everything else must go through the memory system's front door. This keeps the data layer from sprawling across the whole codebase.
+
+But there's one exception — the **task manager** (the part that tracks your to-do items) talks to the database directly too. That's intentional and correct, but the reason was written down *nowhere*. To anyone reading the code, it looked like a rule being quietly broken.
+
+### The reasoning (worth understanding)
+Tasks aren't memories. A memory is something Aether *recalls* — a fact, a past conversation. A task is something Aether is *tracking for you to do*. They happen to live in the same database, but that's just plumbing, not a shared purpose. The actual rule was never "only one part of the code may touch the database" — it's "**each area of responsibility has exactly one gatekeeper.**" Memory has its gatekeeper; Tasks, being a genuinely separate area, gets to have its own. The only thing that must stay true: nothing sneaks around the task manager to poke at the tasks table behind its back.
+
+### What we did
+Nothing but write that reasoning down — in the same words — in the three places a person might run into the question:
+1. At the top of the task-manager code itself.
+2. Right next to the rule in the configuration, where tasks are deliberately left off the "must use the front door" list.
+3. In the technical specification's section on the task manager.
+
+Same explanation in all three, so no one later finds two versions and wonders which is right.
+
+### 💡 The small discipline here
+This was a documentation-only job, and we kept it that way. There *is* a tempting related improvement — restructuring the task manager to match the tidier internal shape the memory system uses. But that's a code change, it wasn't asked for, and the current structure is perfectly valid — it's a matter of style, not correctness. So we left it alone and noted it stays open for some future day when the task manager needs changing anyway. Resisting the "while I'm here, let me also…" urge is exactly how a codebase stays predictable.
+
+The passing boundary check confirms the whole point: the task manager's direct database access is *allowed*, on purpose — and now, finally, that's written down.
+
+---
+
+## Milestone 2.1.12 (M2.1.12): Making Sure Aether Can Find What It Remembered
+
+*Status: Complete. Two ways Aether could fail to recall something it had correctly stored are now fixed — and proven, not just asserted.*
+
+An earlier milestone fixed the *writing* side of Aether's memory: it now reliably files away facts you tell it. This one fixes the *reading* side — two ways it could then fail to find those facts when you ask. A fact stored perfectly but not retrievable is, from your seat, no better than one never stored.
+
+### Problem 1: it couldn't connect a question to its answer when the fast memory was down
+Aether has two ways to search memory: a smart "meaning-based" search (which understands that "What's my name?" and "The user's name is Jordan" are about the same thing), and a fast "keyword" search (which just looks for matching words). The keyword search is the backup, used when the meaning-based one is momentarily unavailable.
+
+The trouble: keyword search demanded that *every* word in your question appear in the answer. "What is my name" shares only the word "name" with "The user's name is Jordan" — so the backup found nothing. Ask your question at the wrong moment, and Aether drew a blank on something it definitely knew.
+
+**Fix:** when falling back to keyword search, strip out the filler words ("what", "is", "my") and search on the meaningful ones ("name"). Now the backup finds the answer.
+
+### 🧠 A design choice worth explaining
+There was a tempting shortcut: tell the keyword search "match ANY of these words" instead of all. But Aether uses *two different* keyword-search engines — one for testing, a different one for the real production database — and that shortcut only works on one of them. It would have silently broken the other. So we chose the approach that works identically on both: just remove the filler words. Same result, no hidden landmine for later. Choosing the boring, portable fix over the clever, fragile one is usually right.
+
+### Problem 2: a chatty memory could outshout an important fact
+When Aether ranks which memories are most relevant, it scored them mostly on similarity, barely on importance. So a rambling, vaguely-related note could rank *above* the clean, important fact you actually asked for — the fact would be there, just buried beneath noise.
+
+**Fix:** give genuine facts a fixed bump in the rankings. Enough that a relevant fact rises above a merely-similar note — but deliberately *not* enough that an irrelevant fact could shove aside a note that's genuinely on-topic. We tested both edges of that boundary to make sure the bump helps without becoming a bludgeon.
+
+### 🔬 The discipline this one demanded
+This was flagged as the most delicate task of the day, because it changes a formula that affects *every single memory recall* — including the project's oldest and most important test, the one proving Aether remembers your name across a restart. The rule was strict: if that test, or any of the memory tests, broke, the task was not done, no matter what else got finished today.
+
+So we did it in order: first **reproduce** both problems against real storage and watch them fail; then try the fix and watch it work; only then change the actual code; then run the *entire* battery of memory tests. Everything passed. Nothing was weakened to make it pass.
+
+### 💡 An honest complication we didn't hide
+While running the full test suite, it crashed once with a low-level memory fault — the same intermittent gremlin a previous task thought it had put to rest. Our changes couldn't have caused it (they're simple text-and-math logic; this was a crash deep in the AI libraries). But it means that earlier "it's fixed" was too confident — the crash is *occasional*, not gone. We finished the required tests the reliable way (one file at a time, all passing) and wrote down, plainly, that the gremlin is still out there and someone should take another look. Reporting the inconvenient truth beats quietly moving on.
+
+---
