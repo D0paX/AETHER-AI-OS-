@@ -6,8 +6,8 @@ function Invoke-NativeCommand {
         Runs a native executable and reports success by EXIT CODE, not by stderr.
 
     .DESCRIPTION
-        docker compose writes its normal progress output — "Container
-        aether-redis Started", image pulls, and similar — to STDERR, not stdout.
+        docker compose writes its normal progress output - "Container
+        aether-redis Started", image pulls, and similar - to STDERR, not stdout.
         Under $ErrorActionPreference = 'Stop', PowerShell 5.1 wraps every stderr
         line from a native executable in a NativeCommandError and raises it as a
         TERMINATING error. The result was that a completely successful
@@ -178,9 +178,32 @@ function Start-AetherInfrastructure {
     Set-Location $originalPath
 
     Write-Host "`nStarting Aether Services..."
-    # Start core and voice services in the background using uv run
-    Start-Process powershell -ArgumentList "-NoExit -Command `"uv run python -m aether`"" -WindowStyle Hidden
-    Start-Process powershell -ArgumentList "-NoExit -Command `"uv run python -m services.voice.main`"" -WindowStyle Hidden
+    # Launch each Python service DIRECTLY as the venv's python.exe - not through
+    # a powershell/uv wrapper - so the PID captured here IS the python.exe
+    # process. stop.ps1 verifies each recorded PID is still that python.exe
+    # before stopping it, and never falls back to a blanket name-kill (DEBT-020).
+    # The venv is already provisioned, so `uv run`'s implicit sync is neither
+    # needed nor wanted here (it is what strips the editable install - DEBT-019).
+    $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+    $venvPython = Join-Path $repoRoot ".venv\Scripts\python.exe"
+
+    $core = Start-Process -FilePath $venvPython -ArgumentList "-m", "aether" `
+        -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
+    $voice = Start-Process -FilePath $venvPython -ArgumentList "-m", "services.voice.main" `
+        -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
+
+    # Record exactly what we launched so stop.ps1 terminates these PIDs and
+    # nothing else. Gitignored via .aether-runtime/.
+    $runtimeDir = Join-Path $repoRoot ".aether-runtime"
+    if (-not (Test-Path $runtimeDir)) {
+        New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
+    }
+    $servicePids = [ordered]@{
+        "aether-core"  = $core.Id
+        "aether-voice" = $voice.Id
+    }
+    $servicePids | ConvertTo-Json | Set-Content -Path (Join-Path $runtimeDir "service-pids.json") -Encoding utf8
+    Write-Host "Recorded service PIDs -> aether-core=$($core.Id), aether-voice=$($voice.Id)"
 
     Test-ServiceHealth -Port 8000 -Name "Aether Core"
     Test-ServiceHealth -Port 8001 -Name "Aether Voice"

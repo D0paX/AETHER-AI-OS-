@@ -849,7 +849,7 @@ and the manual witnessed run remain.
 ## DEBT-019: Missing [build-system] table causes uv sync to silently strip the editable install
 
 **Priority:** P1
-**Status:** Open
+**Status:** Resolved — commit `fix(tooling): DEBT-019 build-system table, DEBT-020 scoped process termination`
 
 **Description:** No [build-system] table exists, so uv sync doesn't
 recognize the project needs editable installation, silently removing
@@ -866,12 +866,37 @@ equivalent, matching the project's actual structure).
 **Target:** Next remediation pass, before it hits the developer's own
 environment.
 
+**Resolution (DEBT-019 build-system task):** Added a real `[build-system]`
+table (`hatchling` / `hatchling.build`) with an explicit
+`[tool.hatch.build.targets.wheel] packages = ["aether", "services"]`. The
+explicit list is required because this is a FLAT layout whose two top-level
+packages match neither each other nor the distribution name `aether-os`, so
+hatchling's name-based auto-detection cannot find them. This replaces the former
+`[tool.setuptools.packages.find]`, which had no `[build-system]` to activate it
+and was therefore inert.
+
+- **Fixed at the root, not worked around:** uninstalled the editable
+  `aether-os`, ran `uv sync`, and it *rebuilt and reinstalled* it
+  (`Built aether-os` -> `Installed 1 package`); `python -c "import
+  aether.core.kernel"` then succeeds. Before this table `uv sync` silently
+  dropped the install and the next `uv run` broke - the exact failure worked
+  around by hand three times across this arc.
+- Gates unaffected: ruff 0, format 0, mypy --strict 0 (62 files), import-linter
+  3 kept/0 broken, 189 tests still collect, DB-free unit subset 13 passed.
+- **`en-core-web-sm` - honest scope note:** it is *not* installed, declared
+  nowhere in `pyproject.toml`, and imported nowhere in the tree (an undeclared,
+  unused stray). The build-system fix does not - and correctly should not - make
+  `uv sync` retain an undeclared package, so that half of the original symptom
+  cannot be "restored"; it was collateral, not a real dependency. The material
+  harm (the editable install being stripped, breaking `uv run` immediately after
+  every sync) is what is fixed here.
+
 ---
 
 ## DEBT-020: stop.ps1 kills any process named "python" on the machine, not only Aether's own
 
 **Priority:** P2
-**Status:** Open
+**Status:** Resolved — commit `fix(tooling): DEBT-019 build-system table, DEBT-020 scoped process termination`
 
 **Description:** Stop-Process -Name "python" -Force matches by name
 only, with no scoping to processes Aether itself spawned — can (and
@@ -884,3 +909,28 @@ than fixed inline.
 **Resolution plan:** Scope the kill to PIDs actually tracked/spawned by
 start.ps1 (a PID file or process-tree match), never a bare name-match.
 **Target:** Next remediation pass.
+
+**Resolution (DEBT-020 scoped-termination task):** start.ps1 now launches each
+service as the venv's `python.exe` DIRECTLY (not through a `powershell`/`uv`
+wrapper), captures each `Start-Process` PID, and records them to
+`.aether-runtime\service-pids.json` (service name -> PID; the directory is
+gitignored). stop.ps1's new `Stop-AetherServices` reads that file and, for each
+recorded PID, verifies it is (a) still running, (b) a `python` process, and (c)
+this project's venv `python.exe` before `Stop-Process -Id`. A missing or corrupt
+file prints a manual-check message and returns - it NEVER falls back to a
+name-match kill. The old `Stop-Process -Name "python" -Force` is gone.
+
+- **Bonus bug caught during validation:** the em-dashes originally written
+  inside stop.ps1's `Write-Host` strings are UTF-8, but Windows PowerShell 5.1
+  reads a BOM-less `.ps1` as cp1252 and mangled them (`—` -> `â€"`), breaking
+  string termination so stop.ps1 would not even *parse*. Both scripts are now
+  pure ASCII (verified: 0 non-ASCII bytes, both `ParseFile` clean).
+- **End-to-end validated with the real scripts:** real start.ps1 recorded the
+  correct PIDs and Aether Core came READY on :8000 (direct launch works); real
+  stop.ps1 then `stopped` the live recorded venv core, reported the dead voice
+  PID as "already exited", left an unrelated venv python untouched (PID scoping),
+  spared a recorded *non-venv* python (path guard) and a recorded *non-python*
+  process (name guard), printed the manual-check message for BOTH a missing and a
+  corrupt PID file while a bystander venv python survived each (proving no blanket
+  kill), removed the PID file, and `docker compose down` preserved the named
+  volumes.

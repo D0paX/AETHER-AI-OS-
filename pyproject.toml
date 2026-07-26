@@ -49,8 +49,21 @@ voice = [
 [project.scripts]
 aether = "aether.__main__:main"
 
-[tool.setuptools.packages.find]
-include = ["aether*", "services*"]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# The build backend (DEBT-019). Without a [build-system] table, uv did not
+# recognise the project as installable and silently dropped the editable
+# `aether-os` install on every `uv sync`, breaking `uv run` immediately after —
+# worked around by hand three times across this remediation arc before being
+# fixed here. Explicit package list because this is a FLAT layout with two
+# top-level packages (`aether`, `services`), neither of which matches the
+# distribution name `aether-os`, so hatchling's name-based auto-detection cannot
+# find them. (Replaces the former `[tool.setuptools.packages.find]`, which had
+# no build-system to activate it and was therefore inert.)
+[tool.hatch.build.targets.wheel]
+packages = ["aether", "services"]
 
 # Dev dependencies in PEP 735 form (D-001). Migrated from the deprecated
 # `[tool.uv] dev-dependencies`, which uv 0.11+ warns on and will remove.

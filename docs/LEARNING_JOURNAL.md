@@ -790,3 +790,22 @@ So we did it in order: first **reproduce** both problems against real storage an
 While running the full test suite, it crashed once with a low-level memory fault — the same intermittent gremlin a previous task thought it had put to rest. Our changes couldn't have caused it (they're simple text-and-math logic; this was a crash deep in the AI libraries). But it means that earlier "it's fixed" was too confident — the crash is *occasional*, not gone. We finished the required tests the reliable way (one file at a time, all passing) and wrote down, plainly, that the gremlin is still out there and someone should take another look. Reporting the inconvenient truth beats quietly moving on.
 
 ---
+
+## Tooling Fixes: A Reliable Install and a Safer "Stop" Button (DEBT-019, DEBT-020)
+
+*Status: Complete. Two rough edges in the developer tooling are fixed — one that quietly uninstalled the project itself, one that could have killed unrelated programs.*
+
+### Problem 1: every dependency sync quietly removed the project itself
+Aether is installed into its environment in "editable" mode, so the code you edit is the code that runs. But the project file was missing the one section that tells the packaging tool *how* to build the project — so every time dependencies were synced, the tool didn't recognise Aether as installable and silently uninstalled it. The very next command that tried to run Aether would then fail, for no obvious reason. This had been patched by hand three separate times without ever fixing the actual cause.
+
+**Fix:** add the missing build instructions, and spell out exactly which folders make up the project (its layout doesn't match its name, so the tool couldn't guess them). Then we proved it the honest way — deliberately uninstall the project, run a sync, and watch it *rebuild and reinstall itself*, after which Aether imports and runs. The recurring breakage is fixed at the source, not papered over again.
+
+### Problem 2: the "stop" script could kill the wrong programs
+The script that shuts Aether down used to stop *every* program on the machine named "python" — including, say, a Python process your code editor was running, or anything else you had open. It had no idea which processes were actually Aether's.
+
+**Fix:** the start script now writes down the exact process IDs it launches, and the stop script only stops those — and only after double-checking each one really is Aether's own Python before touching it. If that little record is missing or damaged, the stop script now simply tells you to check by hand, instead of falling back to the dangerous "kill everything named python" behaviour. We tested this for real: unrelated Python programs (and even a mis-recorded one) were all left untouched, and only Aether's own service was stopped.
+
+### 🐛 A bug we found *because* we ran the real thing
+While validating the stop script, it refused to even start — a parsing error. The cause was subtle: a few typographic dashes (—) in the script's text. The file was saved as UTF-8, but Windows PowerShell reads these scripts using an older encoding, which turned those dashes into garbage and broke the parser mid-sentence. The fix was to keep the scripts to plain ASCII characters. The lesson worth keeping: this only surfaced because we *ran* the scripts end-to-end instead of trusting that an edit that "looks fine" is fine.
+
+---

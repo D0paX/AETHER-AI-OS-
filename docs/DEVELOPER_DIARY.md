@@ -634,4 +634,16 @@ Two retrieval defects, each reproduced against a real store before any code was 
 
 _Outcome:_ A stored fact is now reliably retrievable when Qdrant hiccups, and a high-importance fact is no longer buried by a chattier episode — the read-side half of the promise DEBT-009 fixed on the write side.
 
+---
+
+### **Date:** 2026-07-27 5:01 AM
+
+**Task:** Build-System Table & Scoped Process Termination (DEBT-019, DEBT-020) — tooling fixes, validated with the real scripts.
+
+**Engineering Notes:**
+- **DEBT-019 (`pyproject.toml`).** Added a real `[build-system]` table (`hatchling`) with an explicit `[tool.hatch.build.targets.wheel] packages = ["aether", "services"]`. The flat layout's two packages match neither each other nor the dist name `aether-os`, so name-based auto-detection can't find them; the former `[tool.setuptools.packages.find]` had no build-system to activate it and was inert. Proven at the root: uninstalled `aether-os`, ran `uv sync` (it *rebuilt and reinstalled* the editable install), then `import aether.core.kernel` succeeds — the silent stripping that broke `uv run` three times this arc is gone. `en-core-web-sm` is an undeclared, unused stray (imported nowhere) and is correctly not retained.
+- **DEBT-020 (`start.ps1` / `stop.ps1`).** start.ps1 now launches each service as the venv `python.exe` directly (no powershell/uv wrapper) and records PIDs to gitignored `.aether-runtime/service-pids.json`. stop.ps1 stops only those PIDs — each verified as this venv's python first — and prints a manual-check message rather than ever falling back to a blanket name-kill when the file is missing or corrupt. Caught and fixed a parse-breaking bug on the way: em-dashes inside stop.ps1's `Write-Host` strings are UTF-8, but PS 5.1 reads a BOM-less `.ps1` as cp1252 and mangled them so the script wouldn't parse; both scripts are now pure ASCII.
+
+_Outcome:_ ruff / format / mypy --strict / import-linter all green, 189 tests still collect. Real start→stop cycle validated end-to-end: the recorded core was stopped, an unrelated venv python + a recorded non-venv python + a recorded non-python process were all spared, and missing/corrupt PID files each produced the manual-check message while a bystander python survived.
+
 _(End of current log. Subsequent entries will be appended upon the completion of future milestones.)_
