@@ -1,5 +1,4 @@
 import asyncio
-import os
 from typing import Any
 
 import numpy as np
@@ -7,6 +6,8 @@ import redis.asyncio as redis
 import sounddevice as sd
 import structlog
 
+from aether.core.config import get_config
+from aether.core.exceptions import VoiceError
 from services.voice.models import VoicePipelineState
 from services.voice.stt import FasterWhisperSTT
 from services.voice.tts import KokoroTTS
@@ -14,6 +15,22 @@ from services.voice.vad import SileroVAD
 from services.voice.wake_word import PorcupineWakeWord
 
 logger = structlog.get_logger(__name__)
+
+# Exact placeholder shipped in .env.example — keep in sync with that file's
+# `AETHER_VOICE__PORCUPINE_ACCESS_KEY=` line. A configured value equal to this
+# is treated as "not configured" (M2.1.10 Part 2 / DEBT-018).
+PORCUPINE_KEY_PLACEHOLDER: str = "your-porcupine-key-here"
+
+# Samples per VAD call at 16kHz. This is not a tunable — the installed Silero
+# VAD model enforces it and raises otherwise, stating its own contract:
+#   "Provided number of samples is N (Supported values: 256 for 8000 sample
+#    rate, 512 for 16000)"
+# Verified directly against the installed model (M2.1.10): at 16kHz it accepts
+# 512 and rejects every other size tried (160/256/320/480 -> "chunk is too
+# short"; 640/768/1024/1536 -> "Supported values..."). The pipeline previously
+# sliced frames to 480 (a 30ms estimate from an older Silero release), so every
+# LISTENING-state frame raised and silence detection never ran (DEBT-014).
+VAD_FRAME_SAMPLES: int = 512
 
 
 class VoicePipeline:
@@ -31,9 +48,21 @@ class VoicePipeline:
 
         # Models
         self.vad = SileroVAD(threshold=0.5, sampling_rate=self.sample_rate)
-        # Using default access key placeholder, must be provided in env
-        porcupine_key = os.getenv("PORCUPINE_ACCESS_KEY", "dummy_key_if_not_provided")
-        self.wake_word = PorcupineWakeWord(access_key=porcupine_key)
+        # Wake-word key comes from config (AETHER_VOICE__PORCUPINE_ACCESS_KEY via
+        # env or .env), never a bare os.getenv. Validate it here, at service
+        # init, and fail loudly rather than booting to a silently deaf pipeline.
+        access_key = get_config().voice.porcupine_access_key
+        if not access_key or access_key == PORCUPINE_KEY_PLACEHOLDER:
+            # Never log or embed the configured value, even when it is the
+            # known placeholder — the message says what to do, not what was set.
+            raise VoiceError(
+                "Porcupine access key is not configured. Wake word cannot "
+                "activate. Obtain a free key from console.picovoice.ai and set "
+                "AETHER_VOICE__PORCUPINE_ACCESS_KEY in .env, then restart the "
+                "voice service.",
+                error_code="VOICE_PORCUPINE_KEY_MISSING",
+            )
+        self.wake_word = PorcupineWakeWord(access_key=access_key)
         self.stt = FasterWhisperSTT(model_size="medium.en", device="cuda", compute_type="float16")
         self.tts = KokoroTTS(voice="af_sarah")
 
@@ -90,11 +119,13 @@ class VoicePipeline:
         elif self.state == VoicePipelineState.LISTENING:
             self.audio_buffer.append(audio_frame.copy())
 
-            # Use VAD on 480 samples if we have enough
+            # Feed the VAD exactly VAD_FRAME_SAMPLES; the model accepts no other
+            # size at 16kHz. The capture stream's blocksize is self.frame_length,
+            # which matches, so this slice takes the whole frame.
             # We process frame by frame for simplicity in this loop
-            if len(self.audio_buffer) * self.frame_length >= 480:
+            if len(self.audio_buffer) * self.frame_length >= VAD_FRAME_SAMPLES:
                 # Approximate silence tracking
-                if self.vad.is_speech_threshold(audio_frame[:480]):
+                if self.vad.is_speech_threshold(audio_frame[:VAD_FRAME_SAMPLES]):
                     self.silence_frames = 0
                 else:
                     self.silence_frames += 1

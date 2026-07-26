@@ -2137,7 +2137,7 @@ aether-core ←─────────────────────�
                            ▼
     ┌─────────────────────────────────────────────────────┐
     │                  LISTENING                          │
-    │  Silero VAD monitoring 30ms chunks                  │
+    │  Silero VAD monitoring 32ms chunks (512 samples)    │
     │  Accumulating audio in buffer                       │
     │  Timeout: 15 seconds of total listening             │
     └──────┬───────────────────────────────────┬──────────┘
@@ -2213,11 +2213,24 @@ vad_config = {
     "model": "silero_vad",
     "threshold": 0.5,           # Speech probability threshold
     "sampling_rate": 16000,
+    "frame_samples": 512,       # 32ms @ 16kHz — fixed by the model, not tunable
     "min_speech_duration_ms": 100,
     "max_speech_duration_s": 30,
     "min_silence_duration_ms": 800   # Silence before STT triggers
 }
 ```
+
+**Frame size is fixed by the model, not a design choice.** The installed Silero
+VAD accepts exactly 512 samples at 16kHz (256 at 8kHz) and raises for anything
+else, reporting: `Provided number of samples is N (Supported values: 256 for
+8000 sample rate, 512 for 16000)`. The original design estimated 30ms/480
+samples; that figure came from an older Silero release and was never valid for
+the pinned model — the pipeline sliced frames to 480 and therefore raised on
+every LISTENING-state frame, so silence detection never ran. Corrected in
+M2.1.10 (DEBT-014); the value lives in `services/voice/pipeline.py` as
+`VAD_FRAME_SAMPLES`. Verified directly against the model rather than assumed:
+160/256/320/480 are rejected as "too short", 640/768/1024/1536 are rejected as
+unsupported, and only 512 is accepted.
 
 ### 9.4 VRAM Management on RTX 4050 (6GB)
 

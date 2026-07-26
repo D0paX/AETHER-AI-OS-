@@ -69,3 +69,61 @@ def test_budget_defaults() -> None:
     config = get_config()
     assert config.budget.daily_limit_usd == 2.00
     assert config.budget.monthly_limit_usd == 30.00
+
+
+# --- M2.1.10 Part 2: .env loading and the Porcupine wake-word key ---------
+
+
+def test_dotenv_file_populates_porcupine_key(
+    tmp_path: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A value in a .env file resolves to config.voice.porcupine_access_key.
+
+    Proves the whole chain M1.2 originally left broken: env_file on the
+    settings config PLUS dotenv_settings included in the source chain. The
+    nested AETHER_VOICE__ prefix maps to VoiceConfig.
+    """
+    monkeypatch.delenv("AETHER_VOICE__PORCUPINE_ACCESS_KEY", raising=False)
+    env_file = tmp_path / ".env"  # type: ignore[attr-defined]
+    env_file.write_text("AETHER_VOICE__PORCUPINE_ACCESS_KEY=test-value-12345\n", encoding="utf-8")
+    config = AetherConfig(_env_file=str(env_file))
+    assert config.voice.porcupine_access_key == "test-value-12345"
+
+
+def test_porcupine_key_defaults_to_none(tmp_path: object) -> None:
+    """With nothing configured, the key is None — never a silent fallback."""
+    env_file = tmp_path / ".env"  # type: ignore[attr-defined]
+    env_file.write_text("", encoding="utf-8")
+    config = AetherConfig(_env_file=str(env_file))
+    assert config.voice.porcupine_access_key is None
+
+
+def test_real_env_var_takes_precedence_over_dotenv(
+    tmp_path: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real process env var outranks the .env file (standard precedence)."""
+    monkeypatch.setenv("AETHER_VOICE__PORCUPINE_ACCESS_KEY", "from-real-env")
+    env_file = tmp_path / ".env"  # type: ignore[attr-defined]
+    env_file.write_text("AETHER_VOICE__PORCUPINE_ACCESS_KEY=from-dotenv\n", encoding="utf-8")
+    config = AetherConfig(_env_file=str(env_file))
+    assert config.voice.porcupine_access_key == "from-real-env"
+
+
+def test_dotenv_addition_does_not_break_other_sections(
+    tmp_path: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: enabling .env loading leaves every other section intact.
+
+    Adding env_file/dotenv_settings is additive — YAML defaults and the other
+    config sections must still resolve exactly as before.
+    """
+    monkeypatch.delenv("AETHER_VOICE__PORCUPINE_ACCESS_KEY", raising=False)
+    env_file = tmp_path / ".env"  # type: ignore[attr-defined]
+    env_file.write_text("AETHER_VOICE__PORCUPINE_ACCESS_KEY=test-value-12345\n", encoding="utf-8")
+    config = AetherConfig(_env_file=str(env_file))
+    assert config.version == "1.0.0"
+    assert config.environment in ("development", "production")
+    assert config.memory is not None
+    assert config.budget.daily_limit_usd == 2.00
+    assert config.voice.enabled is True
+    assert config.voice.porcupine_access_key == "test-value-12345"

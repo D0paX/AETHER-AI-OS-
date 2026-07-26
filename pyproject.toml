@@ -68,6 +68,32 @@ dev = [
     "aiofiles>=23.0,<25",
 ]
 
+# PyTorch CUDA 12.x build (M2.1.10 / DEBT-013).
+#
+# Without this, `torch` resolves from PyPI, whose default Windows wheel is the
+# CPU-ONLY build (torch==X.Y.Z+cpu, torch.cuda.is_available() == False). A
+# .venv rebuild silently did exactly that, which left faster-whisper unable to
+# load cublas64_12.dll and took the entire voice pipeline offline while every
+# dependency still "resolved successfully" — a failure with no loud symptom
+# until STT is actually invoked.
+#
+# cu126 is the CUDA 12.x index, matching AETHER_V1_TECHNICAL_SPECIFICATION.md
+# Section 12's "CUDA Toolkit 12.x" requirement. It is also the only 12.x index
+# publishing torch 2.12.x / torchaudio 2.11.x for cp312 on win_amd64 (verified
+# against the index directly: cu121/cu124/cu128/cu129 do not). CUDA 12.6 wheels
+# are forward-compatible with the installed 13.3 driver.
+#
+# `explicit = true` confines this index to the packages mapped below, so no
+# other dependency is silently resolved from it.
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchaudio = { index = "pytorch-cu126" }
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
