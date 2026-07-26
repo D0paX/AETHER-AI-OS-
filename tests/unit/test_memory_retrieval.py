@@ -9,11 +9,17 @@ from aether.memory._retrieval.reranker import MemoryReranker
 from aether.memory.models import MemoryFilter, MemoryRecord, MemorySource, MemoryType
 
 
-def create_mock_record(memory_id: str, content: str, created_at: datetime, importance: float = 0.5):
+def create_mock_record(
+    memory_id: str,
+    content: str,
+    created_at: datetime,
+    importance: float = 0.5,
+    memory_type: MemoryType = MemoryType.FACT,
+):
     return MemoryRecord(
         id=memory_id,
         content=content,
-        memory_type=MemoryType.FACT,
+        memory_type=memory_type,
         importance=importance,
         confidence=0.9,
         source=MemorySource.CONVERSATION,
@@ -69,6 +75,52 @@ def test_reranker_sorts_by_composite_score_descending():
 
     assert ranked[0].id == "2"
     assert ranked[1].id == "1"
+
+
+def test_high_importance_fact_outranks_more_similar_episode():
+    """DEBT-012: a durable FACT must not be buried by a merely-similar episode.
+
+    The episode here has a HIGHER raw similarity and identical recency; only the
+    categorical FACT boost lets the high-importance fact win. Under the old
+    0.6/0.3/0.1 formula the episode ranked first.
+    """
+    reranker = MemoryReranker()
+    now = datetime.now(UTC)
+
+    fact = create_mock_record(
+        "fact", "The user's name is Jordan", now, importance=0.85, memory_type=MemoryType.FACT
+    )
+    episode = create_mock_record(
+        "episode", "User Task: greeting", now, importance=0.7, memory_type=MemoryType.EPISODE
+    )
+
+    # Episode is MORE similar (0.80 > 0.70) yet the fact must still rank first.
+    ranked = reranker.rerank([(fact, 0.70), (episode, 0.80)], token_budget=10000)
+    assert ranked[0].id == "fact"
+    assert ranked[1].id == "episode"
+
+
+def test_fact_boost_does_not_bury_a_much_more_relevant_episode():
+    """DEBT-012 precision guard: the boost is bounded, not absolute.
+
+    An essentially-irrelevant FACT (very low similarity) must NOT displace a
+    highly-relevant EPISODE — otherwise the boost would make facts dominate
+    indiscriminately.
+    """
+    reranker = MemoryReranker()
+    now = datetime.now(UTC)
+
+    weak_fact = create_mock_record(
+        "weak_fact", "unrelated fact", now, importance=0.85, memory_type=MemoryType.FACT
+    )
+    strong_episode = create_mock_record(
+        "strong_episode", "highly relevant", now, importance=0.7, memory_type=MemoryType.EPISODE
+    )
+
+    # Fact barely matches (0.05); episode is a strong match (0.95).
+    ranked = reranker.rerank([(weak_fact, 0.05), (strong_episode, 0.95)], token_budget=10000)
+    assert ranked[0].id == "strong_episode"
+    assert ranked[1].id == "weak_fact"
 
 
 @pytest.mark.asyncio

@@ -1,12 +1,26 @@
 from datetime import UTC, datetime
 
-from ..models import ContextPackage, MemoryRecord
+from ..models import ContextPackage, MemoryRecord, MemoryType
 
 
 class MemoryReranker:
     """Internal module for scoring and assembling memory context."""
 
     RERANK_WEIGHTS = {"similarity": 0.6, "recency": 0.3, "importance": 0.1}
+
+    # Categorical boost added to a MemoryType.FACT's composite score (DEBT-012).
+    # The 0.6/0.3/0.1 linear formula let a merely-similar EPISODE outrank a
+    # high-importance FACT, because importance contributes at most 0.1 while
+    # similarity contributes up to 0.6 — so a ~0.15 similarity edge on an episode
+    # buried the clean fact the user actually asked for. This boost is applied
+    # once, uniformly, to every FACT, independent of the linear score, so it does
+    # not perturb the relative ordering among non-facts (or among facts). At 0.15
+    # it lets a FACT overcome a raw-similarity deficit of up to ~0.15/0.6 ≈ 0.25
+    # against an episode — enough to win when similarity is comparable, but NOT
+    # enough for an irrelevant FACT (very low similarity) to displace a
+    # highly-relevant episode. Both bounds are proven in
+    # tests/unit/test_memory_retrieval.py.
+    FACT_SCORE_BOOST = 0.15
 
     def _calculate_recency_weight(self, created_at: datetime) -> float:
         now = datetime.now(UTC)
@@ -32,6 +46,11 @@ class MemoryReranker:
                 + (self.RERANK_WEIGHTS["recency"] * recency_weight)
                 + (self.RERANK_WEIGHTS["importance"] * record.importance)
             )
+            # Categorical FACT boost (DEBT-012): keep a durable stated fact from
+            # being buried by a merely-similar episode. Uniform, so ordering
+            # among non-facts and among facts is unchanged.
+            if record.memory_type == MemoryType.FACT:
+                score += self.FACT_SCORE_BOOST
             scored_candidates.append((record, score))
 
         # Sort descending by score
