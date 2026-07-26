@@ -136,6 +136,15 @@ include_external_packages = true
 name = "Memory module boundary: no external DB access"
 type = "forbidden"
 allow_indirect_imports = true
+# aether.tasks is deliberately NOT a source module of this contract (DEBT-017).
+# TaskManager (aether/tasks/manager.py) imports SQLAlchemy directly, by design:
+# Tasks are a separate domain, not a form of memory — they are actionable to-do
+# items, not recalled facts, and only share the physical database as
+# infrastructure. Aether's principle is "each domain has exactly one gatekeeper,"
+# not "only one module may touch SQL anywhere," so the Tasks domain owns its own
+# DB access just as Memory's _stores/ does for its domain. Do not add
+# "aether.tasks" here without amending that decision. See aether/tasks/manager.py
+# and V1_TECHNICAL_SPECIFICATION.md Section 2.9.
 source_modules = [
     "aether.agents",
     "aether.session",

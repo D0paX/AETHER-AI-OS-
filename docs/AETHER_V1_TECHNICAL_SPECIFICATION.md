@@ -1025,6 +1025,22 @@ class Session(BaseModel):
 
 **Purpose:** Task CRUD with state machine. All task state changes emit events.
 
+**Database-boundary exemption (DEBT-017):** TaskManager imports SQLAlchemy
+directly, which the "Memory module boundary" import-linter contract forbids for
+every other consumer. This is deliberate. Tasks are a separate domain, not a
+form of memory — the memory taxonomy in AETHER_INTELLIGENCE_ARCHITECTURE.md has
+never classified tasks as memory; they are actionable to-do items, not recalled
+facts. Tasks share the same physical database as memories purely as
+infrastructure, not as a shared domain. Aether's architectural principle is
+"each domain has exactly one gatekeeper," not "only one module may touch SQL
+anywhere," so it is consistent for the Tasks domain to own its own database
+access, exactly as Memory's `_stores/` does for its domain. The invariant: no
+module outside TaskManager may reach around it to touch the `tasks` table
+directly. Accordingly, `aether.tasks` is intentionally excluded from that
+contract's `source_modules` in `pyproject.toml`. (Giving TaskManager the same
+private-store/public-manager split Memory has is a separate, lower-priority
+opportunistic item — not part of this exemption.)
+
 **Task state machine:**
 ```
 PENDING → ACTIVE → COMPLETED
