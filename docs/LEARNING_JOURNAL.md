@@ -809,3 +809,25 @@ The script that shuts Aether down used to stop *every* program on the machine na
 While validating the stop script, it refused to even start — a parsing error. The cause was subtle: a few typographic dashes (—) in the script's text. The file was saved as UTF-8, but Windows PowerShell reads these scripts using an older encoding, which turned those dashes into garbage and broke the parser mid-sentence. The fix was to keep the scripts to plain ASCII characters. The lesson worth keeping: this only surfaced because we *ran* the scripts end-to-end instead of trusting that an edit that "looks fine" is fine.
 
 ---
+
+## Milestone 2.2 (M2.2): The Bouncer at the Door
+
+*Status: Complete. Aether now has a single, fast, rule-based gate that every risky action — opening a program, touching a file — must pass before it happens. And it asks no AI for permission.*
+
+This is the first brand-new feature since the long cleanup stretch. Before Aether can be trusted to open apps and move files (that comes next), it needs something standing at the door deciding what's allowed. That something is the **SafetyValidator**.
+
+### Why it is NOT an AI
+The obvious-sounding design would be to ask an AI "is this action safe?" We deliberately did not do that, and this milestone is where that decision becomes real code. Two reasons: **money** (asking an AI to approve every single file touch would cost a fortune over a day of use) and **speed** (an AI takes hundreds of milliseconds to answer; this gate answers in under *ten* — we measured it). A door bouncer who has to phone head office before letting anyone through is not a bouncer. So the rules live in a plain, human-editable list (`permissions.yaml`), and the validator just checks against them.
+
+### The one principle: when unsure, say no
+Every decision the gate makes leans the same way — **if something isn't explicitly allowed, it's denied.** Asked to launch a program that's on neither the allowed nor the forbidden list? Denied. Given a file path that isn't inside any folder you've permitted? Denied. This is the opposite of the tempting "allow unless it's on the naughty list" approach, and it's the whole reason a gate like this is trustworthy: a gap in the rules fails safe, not open.
+
+A few things it's careful about:
+- **`cmd.exe` can't sneak past by changing its clothes.** Whether you ask for `cmd.exe`, `CMD.EXE`, or the full `C:\Windows\System32\cmd.exe`, they all get recognised as the same forbidden program.
+- **Deleting a file is allowed but flagged.** The gate doesn't block a delete outright, but it stamps it "needs the user to confirm first" — the actual confirmation gets enforced by the part built next.
+- **Every yes or no comes with a reason.** The gate can never silently allow or silently deny — a result without a written explanation is rejected by the code itself. When something is refused, you can always find out why.
+
+### 🐛 The test that caught a real hole
+The rule bar for security code is deliberately punishing: prove *every single* forbidden program and *every single* forbidden folder is blocked, one by one. While writing those tests, one for web addresses caught a genuine mistake — a nonsense string like `"not a url at all"` was being *accepted* as if it were a real website, because the standard URL parser is too forgiving. That's exactly the fail-open gap the strict testing exists to find. We fixed the gate to reject anything that isn't a properly-formed web address. The lesson: for security code, "write the exhaustive tests" isn't box-ticking — it's how you find the hole before someone else does.
+
+---

@@ -646,4 +646,27 @@ _Outcome:_ A stored fact is now reliably retrievable when Qdrant hiccups, and a 
 
 _Outcome:_ ruff / format / mypy --strict / import-linter all green, 189 tests still collect. Real start→stop cycle validated end-to-end: the recorded core was stopped, an unrelated venv python + a recorded non-venv python + a recorded non-python process were all spared, and missing/corrupt PID files each produced the manual-check message while a bystander python survived.
 
+### **Date:** 2026-07-27 7:03 AM
+
+**Milestone:** M2.2 (Security Module — SafetyValidator). The first genuinely new Phase 2 feature after the M2.1.5–M2.1.12 remediation arc: the single rule-based gate every privileged action must pass through, with zero LLM calls by design.
+
+**Engineering Notes:**
+Built `aether/security/` as a peer of `aether/memory/` and `aether/llm/` — four files, four locked methods, no database/Qdrant/Redis dependency (it reads one YAML file and holds it in memory).
+
+- **`models.py`** — `ValidationResult` (frozen; a `field_validator` makes an empty `reason` a construction error, so no decision is ever recorded without a justification — ADR-011 §9), `Permission`, and `DestructiveOperation` (StrEnum, values mirroring `permissions.yaml`).
+- **`_permissions_loader.py`** (private) — parses `.aether/permissions.yaml` into a frozen `PermissionsConfig` with `extra="forbid"` on every section (a misspelled `forbidden_paths` fails loudly rather than silently dropping a rule). Resolves `${USERPROFILE}` here; every failure — missing file, bad YAML, schema mismatch, unresolved env var — is a `ConfigurationError` with an actionable message, never a bare parse traceback.
+- **`validator.py`** — `SafetyValidator`. Loads permissions once at construction and **refuses to construct** if they can't load (a validator that can't read its rules must not exist and silently allow everything). Fail-closed throughout: app launch is an allowlist (unlisted → denied, not merely "not forbidden"); forbidden paths take priority over allow; unrecognized file operations denied; executables matched case-insensitively on the base name (`CMD.EXE`, `cmd.exe`, and a full path all resolve to `cmd.exe`). Destructive file ops on a permitted path are allowed but flagged `requires_confirmation=True`. Every decision logs at INFO (ADR-010 audit trail).
+- **Zero LLM dependency** verified by grep (`llm_router|ModelTier|litellm|anthropic|openai` → 0 matches in `aether/security/`) and by a source-scanning unit test. This is the concrete implementation of the Critical Audit's rejection of an LLM Guardian on cost/latency grounds; the p50<10ms target an LLM could never hit is met with room to spare.
+
+**Testing — 68 tests, near-complete branch coverage (security-critical class):** every `forbidden_launch` and `forbidden_paths` entry proven denied *individually* (parametrized from the real YAML); allow-list entries allowed; unlisted denied; case + full-path variants; destructive→confirmation; `is_destructive` over every enum value + non-destructive; hidden-file and size-limit branches; all six loader failure modes via the public constructor; and a performance test asserting the p50<10ms / p95<25ms targets. Gates: ruff 0, format clean, mypy --strict 0 (66 files), import-linter 3 kept/0 broken. Full non-integration suite 236 passed (168 prior + 68 new).
+
+**Honest notes for review:**
+- Writing the browser tests **caught a real fail-closed gap**: `urlparse` hands back `"not a url at all"` as a "hostname", so a malformed URL was being *allowed*. Fixed in `validate_browser_action` with a hostname-format check — the kind of bug the elevated coverage bar exists to catch.
+- `import yaml` needed a scoped `# type: ignore[import-untyped]` (PyYAML ships no stubs; `types-PyYAML` isn't a project dep and adding it is out of M2.2's file scope).
+- **Recommendation (out of scope, next pass):** add `aether.security` to the import-linter "LLM boundary" contract's `source_modules` so the zero-LLM guarantee is enforced structurally, not only by grep + review. Left untouched because M2.2 is scoped to `aether/security/` and must not edit `pyproject.toml`.
+
+_Outcome:_ The enforcement gate M2.3's PC control will sit behind exists, is proven fail-closed on every path, and adds no LLM cost or latency. `validate_browser_action` is fully implemented and tested now for interface stability though no Phase 2 code calls it (Phase 3). No M2.3 work begun.
+
+---
+
 _(End of current log. Subsequent entries will be appended upon the completion of future milestones.)_
