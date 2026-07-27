@@ -21,10 +21,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-# PyYAML ships no type stubs and types-PyYAML is not a project dependency;
-# scoped ignore here rather than a pyproject mypy override (M2.2 touches only
-# aether/security/). Mirrors the M2.1.9 approach to stubless third-party libs.
-import yaml  # type: ignore[import-untyped]
+import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from aether.core.exceptions import ConfigurationError

@@ -15,6 +15,9 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, field_validator
 
 
+# StrEnum (not the prompt's `(str, Enum)`) is deliberate: codebase convention
+# (see aether/tasks/models.py) and it satisfies ruff UP042; behaviour is identical
+# for the `.value` comparisons is_destructive() and the loader rely on.
 class DestructiveOperation(StrEnum):
     """The operations Aether treats as destructive.
 

@@ -79,6 +79,9 @@ dev = [
     "import-linter>=2.0,<3",
     "pre-commit>=3.8,<4",
     "aiofiles>=23.0,<25",
+    # Type stubs for PyYAML (M2.2 hardening). aether/security/_permissions_loader
+    # imports yaml directly; without these, mypy --strict flags import-untyped.
+    "types-pyyaml>=6.0,<7",
 ]
 
 # PyTorch CUDA 12.x build (M2.1.10 / DEBT-013).
@@ -202,6 +205,9 @@ forbidden_modules = [
 name = "LLM boundary: no direct provider access"
 type = "forbidden"
 allow_indirect_imports = true
+# aether.security added (M2.2 hardening): SafetyValidator's whole architectural
+# point is zero LLM calls (rule-based gate, per the Critical Audit's rejection of
+# an LLM Guardian). Enforced here structurally in CI, not only by grep + review.
 source_modules = [
     "aether.agents",
     "aether.memory",
@@ -209,6 +215,7 @@ source_modules = [
     "aether.tasks",
     "aether.session",
     "aether.interfaces",
+    "aether.security",
 ]
 forbidden_modules = [
     "aether.llm._providers",

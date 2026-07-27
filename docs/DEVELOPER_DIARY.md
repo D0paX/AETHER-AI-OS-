@@ -669,4 +669,17 @@ _Outcome:_ The enforcement gate M2.3's PC control will sit behind exists, is pro
 
 ---
 
+### **Date:** 2026-07-27 7:40 AM
+
+**Task:** M2.2 hardening (pyproject.toml only) — closes the two follow-ups the M2.2 entry flagged.
+
+**Engineering Notes:**
+- **`types-PyYAML` added to dev deps.** Removed the scoped `# type: ignore[import-untyped]` on `import yaml` in `_permissions_loader.py`; mypy --strict stays clean (66 files) with real stubs instead of a suppression.
+- **`aether.security` added to the import-linter "LLM boundary" contract `source_modules`.** The zero-LLM guarantee SafetyValidator depends on is now enforced structurally by CI, not only by the M2.2 grep + review. lint-imports: 3 kept / 0 broken, aether.security in the enforced set.
+- **`DestructiveOperation` StrEnum confirmed deliberate** (vs the prompt's `(str, Enum)`): codebase convention + ruff UP042, identical `.value` behaviour. Reasoning now a one-line comment above the class.
+
+_Outcome:_ ruff 0, format clean, mypy --strict 0, import-linter 3 kept/0 broken, 68 security tests pass. No M2.3 work begun.
+
+---
+
 _(End of current log. Subsequent entries will be appended upon the completion of future milestones.)_
