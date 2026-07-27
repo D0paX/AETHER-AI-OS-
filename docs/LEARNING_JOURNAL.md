@@ -831,3 +831,28 @@ A few things it's careful about:
 The rule bar for security code is deliberately punishing: prove *every single* forbidden program and *every single* forbidden folder is blocked, one by one. While writing those tests, one for web addresses caught a genuine mistake — a nonsense string like `"not a url at all"` was being *accepted* as if it were a real website, because the standard URL parser is too forgiving. That's exactly the fail-open gap the strict testing exists to find. We fixed the gate to reject anything that isn't a properly-formed web address. The lesson: for security code, "write the exhaustive tests" isn't box-ticking — it's how you find the hole before someone else does.
 
 ---
+
+## Milestone 2.3 (M2.3): Aether Reaches Out and Touches the Computer
+
+*Status: Complete. For the first time, Aether can actually open, close, focus, and list real programs on your machine — and it cannot open one the rules forbid.*
+
+Every milestone until now stayed inside Aether's own head: remembering things, thinking, talking. This is the first one where Aether does something to your actual computer. That makes it the first place a bug could open a program you didn't want opened. So the whole design is built around one non-negotiable rule.
+
+### The one rule: ask the bouncer first, every time
+Last milestone we built the bouncer (the SafetyValidator). This milestone puts it to work. There is exactly *one* door for taking any action — a single function called `execute_action` — and before it launches anything, it asks the bouncer "is this allowed?" and only proceeds on a yes. There is no side door, no shortcut, no "just this once." We proved it two ways: a test that watches the order of events and fails unless the permission check happens *before* the launch, and a test that tries every forbidden program (`cmd.exe`, `powershell.exe`, and the rest) through this new layer and confirms each one is stopped — not just trusting that the bouncer, tested separately, still works.
+
+### Three layers, one of them sealed off
+The code is deliberately built in three layers, like an airlock:
+1. The **public door** (`api.py`) — the only thing the rest of Aether is allowed to talk to.
+2. The **middle** (`app_control`) — organises the work and writes the log.
+3. The **sealed room** (`windows.py`) — the only place allowed to touch the Windows-specific machinery that actually clicks buttons and starts programs.
+
+Nothing outside that sealed room may import the powerful automation tools — and we wrote a test that literally reads every other file to prove none of them do. Keeping the dangerous capability behind one wall means there's only one place to audit when you want to be sure it's used safely.
+
+### A design nicety: the permission list lives in one place
+Notice what's *not* in this code: any list of which programs are allowed. That list lives entirely in the permissions file the bouncer reads. The action code never hardcodes "cmd.exe is bad" — it just asks. So changing what's allowed is a one-line edit to a settings file, never a code change. One source of truth.
+
+### 🧹 An honest mistake in the cleanup
+After proving a launch worked, I closed the test program to tidy up — and closed it *by name*. On Windows 11, Notepad shares one process across all its tabs, so "close Notepad" force-killed a Notepad the user already had open, with unsaved text, and no save prompt. The *tool* did exactly what it was told; the mistake was mine in telling it to close by name when an existing instance was around. Recorded plainly, because the honest log of what went wrong is worth more than a tidy one. The takeaway for the file-operations work coming next: "clean up after yourself" has to mean *only* the thing you created, never anything that was already there.
+
+---

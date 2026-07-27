@@ -682,4 +682,27 @@ _Outcome:_ ruff 0, format clean, mypy --strict 0, import-linter 3 kept/0 broken,
 
 ---
 
+### **Date:** 2026-07-28 2:28 AM
+
+**Milestone:** M2.3 (PC Control Core — Application Control). First milestone that reaches out and touches the host machine: launch, close, focus, list — every launch gated by SafetyValidator.
+
+**Engineering Notes:**
+New module `aether/pc_control/` (peer of memory/llm/security), three-layer: public `api.py` → private `_control/app_control.py` → private `_adapters/windows.py` (the sole importer of the automation libs).
+
+- **`api.py`** — `PCControlAPI` + the frozen models `PCAction` / `ActionResult` / `ApplicationInfo`. `execute_action()` is the single funnel; for `launch` it `await`s `SafetyValidator.validate_app_launch()` and only dispatches to `_control` if allowed — a denied exe never reaches the adapter. `SafetyValidator` is injected (never constructed), so the gate is mockable. `close`/`focus` resolve a running pid from the executable name and are not launch-gated (terminating/focusing an existing process is not the privileged act launching an arbitrary binary is). `list_applications()` is read-only, ungated, still logged. Models live in api.py per spec; the `api → _control` edge is a local import inside the methods to avoid a cycle (E402-clean).
+- **`_adapters/windows.py`** — pywin32 (already present) does launch (`subprocess.Popen`, shell=False), close (`OpenProcess`+`TerminateProcess`), and list (`EnumWindows` over visible titled windows → name/pid/title); `pywinauto` (lazy-imported, so the module and unit tests load without the automation stack) does focus. Every function catches the specific library exception (`pywintypes.error`, `ProcessNotFoundError`, `ElementNotFoundError`) and returns a structured tuple — no raw exception escapes.
+- **pyproject:** added an `automation` optional-dependency group (`pywinauto`, `pyautogui`, pre-approved per V1 §7.7) and mypy overrides for `pywinauto.*`/`win32*`/`pywintypes` (stubless, scoped exactly like the existing audio-lib overrides).
+
+**Testing — 23 unit tests, mocked adapter + validator:** validate-before-dispatch order proven; a denied launch proven to never reach the adapter; **every `forbidden_launch` entry proven denied at the api layer with the REAL SafetyValidator** (defense in depth, not only inside the validator); allow-list dispatched; list/close/focus against a mocked process list; two architecture source-scans (automation libs only in `windows.py`; nothing outside `pc_control/` imports `_adapters`/`_control`); perf test (p50<500ms/p95<1000ms). Gates: ruff 0, format clean, mypy --strict 0 (72 files), import-linter 3 kept/0 broken. Non-integration suite 259 passed (236 + 23).
+
+**Manual validation (real API, real desktop):** `execute_action(launch notepad.exe)` opened Notepad and returned its pid; `list_applications()` showed notepad.exe running; `execute_action(launch cmd.exe)` was denied with no process started.
+
+**Honest notes for review:**
+- **Cleanup incident:** my manual-validation cleanup closed Notepad by name via `TerminateProcess`, which — because Win11 Notepad is single-process/tabbed — force-killed a *pre-existing* Notepad instance (title showed unsaved changes) rather than only the one I launched. No save prompt. A code-correct action (the API did exactly as asked), but an over-aggressive cleanup choice on my part; flagged, not hidden.
+- **Recommendation (out of scope, follow-up):** add `aether.pc_control` to the import-linter contracts — a "PC control adapter boundary" (only `_adapters.windows` imports pywinauto/pyautogui) and inclusion in the LLM boundary — so §6's constraints are enforced in CI, not only by the source-scan tests here. Left out because this milestone's pyproject scope was the automation deps.
+
+_Outcome:_ Aether can now launch/close/focus/list applications, every launch provably behind SafetyValidator, no path to the OS adapter that bypasses `execute_action`. File operations (M2.4) and system monitoring (M2.5) extend this same module. No M2.4 work begun.
+
+---
+
 _(End of current log. Subsequent entries will be appended upon the completion of future milestones.)_

@@ -45,6 +45,14 @@ voice = [
     "kokoro>=0.7,<1",
     "soundfile>=0.12,<1",
 ]
+# Windows automation stack (M2.3 / V1_TECHNICAL_SPECIFICATION.md Section 7.7).
+# Pre-approved; used only inside aether/pc_control/_adapters/windows.py. pywin32
+# (already present transitively) covers launch/close/list; pywinauto drives
+# window focus.
+automation = [
+    "pywinauto>=0.6,<1",
+    "pyautogui>=0.9,<1",
+]
 
 [project.scripts]
 aether = "aether.__main__:main"
@@ -156,6 +164,15 @@ module = [
     "sounddevice.*",
     "kokoro.*",
     "faster_whisper.*",
+    # Windows automation stack (M2.3). Neither pywinauto nor the pywin32
+    # win32* extension modules ship type stubs; scoped like the audio libs
+    # above so the strict global ignore_missing_imports = false still governs
+    # every other import.
+    "pywinauto.*",
+    "win32api",
+    "win32gui",
+    "win32process",
+    "pywintypes",
 ]
 ignore_missing_imports = true
 
