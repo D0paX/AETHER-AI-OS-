@@ -790,3 +790,89 @@ So we did it in order: first **reproduce** both problems against real storage an
 While running the full test suite, it crashed once with a low-level memory fault — the same intermittent gremlin a previous task thought it had put to rest. Our changes couldn't have caused it (they're simple text-and-math logic; this was a crash deep in the AI libraries). But it means that earlier "it's fixed" was too confident — the crash is *occasional*, not gone. We finished the required tests the reliable way (one file at a time, all passing) and wrote down, plainly, that the gremlin is still out there and someone should take another look. Reporting the inconvenient truth beats quietly moving on.
 
 ---
+
+## Tooling Fixes: A Reliable Install and a Safer "Stop" Button (DEBT-019, DEBT-020)
+
+*Status: Complete. Two rough edges in the developer tooling are fixed — one that quietly uninstalled the project itself, one that could have killed unrelated programs.*
+
+### Problem 1: every dependency sync quietly removed the project itself
+Aether is installed into its environment in "editable" mode, so the code you edit is the code that runs. But the project file was missing the one section that tells the packaging tool *how* to build the project — so every time dependencies were synced, the tool didn't recognise Aether as installable and silently uninstalled it. The very next command that tried to run Aether would then fail, for no obvious reason. This had been patched by hand three separate times without ever fixing the actual cause.
+
+**Fix:** add the missing build instructions, and spell out exactly which folders make up the project (its layout doesn't match its name, so the tool couldn't guess them). Then we proved it the honest way — deliberately uninstall the project, run a sync, and watch it *rebuild and reinstall itself*, after which Aether imports and runs. The recurring breakage is fixed at the source, not papered over again.
+
+### Problem 2: the "stop" script could kill the wrong programs
+The script that shuts Aether down used to stop *every* program on the machine named "python" — including, say, a Python process your code editor was running, or anything else you had open. It had no idea which processes were actually Aether's.
+
+**Fix:** the start script now writes down the exact process IDs it launches, and the stop script only stops those — and only after double-checking each one really is Aether's own Python before touching it. If that little record is missing or damaged, the stop script now simply tells you to check by hand, instead of falling back to the dangerous "kill everything named python" behaviour. We tested this for real: unrelated Python programs (and even a mis-recorded one) were all left untouched, and only Aether's own service was stopped.
+
+### 🐛 A bug we found *because* we ran the real thing
+While validating the stop script, it refused to even start — a parsing error. The cause was subtle: a few typographic dashes (—) in the script's text. The file was saved as UTF-8, but Windows PowerShell reads these scripts using an older encoding, which turned those dashes into garbage and broke the parser mid-sentence. The fix was to keep the scripts to plain ASCII characters. The lesson worth keeping: this only surfaced because we *ran* the scripts end-to-end instead of trusting that an edit that "looks fine" is fine.
+
+---
+
+## Milestone 2.2 (M2.2): The Bouncer at the Door
+
+*Status: Complete. Aether now has a single, fast, rule-based gate that every risky action — opening a program, touching a file — must pass before it happens. And it asks no AI for permission.*
+
+This is the first brand-new feature since the long cleanup stretch. Before Aether can be trusted to open apps and move files (that comes next), it needs something standing at the door deciding what's allowed. That something is the **SafetyValidator**.
+
+### Why it is NOT an AI
+The obvious-sounding design would be to ask an AI "is this action safe?" We deliberately did not do that, and this milestone is where that decision becomes real code. Two reasons: **money** (asking an AI to approve every single file touch would cost a fortune over a day of use) and **speed** (an AI takes hundreds of milliseconds to answer; this gate answers in under *ten* — we measured it). A door bouncer who has to phone head office before letting anyone through is not a bouncer. So the rules live in a plain, human-editable list (`permissions.yaml`), and the validator just checks against them.
+
+### The one principle: when unsure, say no
+Every decision the gate makes leans the same way — **if something isn't explicitly allowed, it's denied.** Asked to launch a program that's on neither the allowed nor the forbidden list? Denied. Given a file path that isn't inside any folder you've permitted? Denied. This is the opposite of the tempting "allow unless it's on the naughty list" approach, and it's the whole reason a gate like this is trustworthy: a gap in the rules fails safe, not open.
+
+A few things it's careful about:
+- **`cmd.exe` can't sneak past by changing its clothes.** Whether you ask for `cmd.exe`, `CMD.EXE`, or the full `C:\Windows\System32\cmd.exe`, they all get recognised as the same forbidden program.
+- **Deleting a file is allowed but flagged.** The gate doesn't block a delete outright, but it stamps it "needs the user to confirm first" — the actual confirmation gets enforced by the part built next.
+- **Every yes or no comes with a reason.** The gate can never silently allow or silently deny — a result without a written explanation is rejected by the code itself. When something is refused, you can always find out why.
+
+### 🐛 The test that caught a real hole
+The rule bar for security code is deliberately punishing: prove *every single* forbidden program and *every single* forbidden folder is blocked, one by one. While writing those tests, one for web addresses caught a genuine mistake — a nonsense string like `"not a url at all"` was being *accepted* as if it were a real website, because the standard URL parser is too forgiving. That's exactly the fail-open gap the strict testing exists to find. We fixed the gate to reject anything that isn't a properly-formed web address. The lesson: for security code, "write the exhaustive tests" isn't box-ticking — it's how you find the hole before someone else does.
+
+---
+
+## Milestone 2.4 (M2.4): Aether Can Touch Your Files — Carefully
+
+*Status: Complete. Aether can now find, read, and move files inside the folders you've permitted — and it cannot read, move, or overwrite anything outside them. It cannot delete, at all, ever.*
+
+Opening programs was last time; this time it's your files. Same iron rule as before — one door, and the bouncer checks it every time — plus two habits specific to files.
+
+### Habit one: figure out where a path *really* points before deciding
+Paths lie. `Documents/../../Windows/secret.txt` looks like it's in your Documents folder, but the `../..` climbs out of it and lands in Windows. So before Aether asks "is this allowed?", it first **resolves** the path — follows every `..` and shortcut to the real, final location — and validates *that*. Checking the path you were handed instead of the path it actually points to is how sandboxes get escaped, so this happens with no exceptions. We wrote a test that hands it exactly that kind of climb-out path and confirms it's blocked.
+
+### Habit two: overwriting needs a second "yes"
+Moving a file to a brand-new name is ordinary. Moving it *on top of* a file that already exists destroys whatever was there — so that specific case requires a **confirmation token**: an explicit second yes that a higher layer only supplies after the user agrees. No token, no overwrite — the operation is refused and nothing changes. And notably: there is **no delete feature** anywhere in this module, by design. It's not disabled or hidden; it simply doesn't exist, and a test scans the code to prove no delete function crept in.
+
+### The move that only ever touches what you named
+Carrying the last milestone's hard-won lesson forward: the "move" operation acts on the **exact file you point it at** — never a name it looked up. We proved it by putting three similarly-named files side by side (`report.txt`, `report.txt.bak`, `report2.txt`), moving only `report.txt`, and confirming the other two were completely untouched. A previous milestone destroyed unrelated data through a name-based lookup; this design makes that class of mistake impossible here.
+
+### ⚖️ An honest engineering compromise
+Two rules gently disagreed. An earlier rule says "refuse files bigger than the limit." This milestone says "for reading, don't refuse a big file — just hand back the first chunk and mark it as trimmed." Both are reasonable. We resolved it in reading's favor (you get a usable preview of a large log instead of a flat "no"), but *only* for the size question — a file in a forbidden folder is still a hard no. The one inelegant part: to tell "too big" apart from "not allowed," the code currently reads the bouncer's written explanation. It works and it's safe, but it's a small knot we've flagged to tidy later with a cleaner signal. Writing down the compromise, and its rough edge, beats pretending the two rules never disagreed.
+
+---
+
+## Milestone 2.3 (M2.3): Aether Reaches Out and Touches the Computer
+
+*Status: Complete. For the first time, Aether can actually open, close, focus, and list real programs on your machine — and it cannot open one the rules forbid.*
+
+Every milestone until now stayed inside Aether's own head: remembering things, thinking, talking. This is the first one where Aether does something to your actual computer. That makes it the first place a bug could open a program you didn't want opened. So the whole design is built around one non-negotiable rule.
+
+### The one rule: ask the bouncer first, every time
+Last milestone we built the bouncer (the SafetyValidator). This milestone puts it to work. There is exactly *one* door for taking any action — a single function called `execute_action` — and before it launches anything, it asks the bouncer "is this allowed?" and only proceeds on a yes. There is no side door, no shortcut, no "just this once." We proved it two ways: a test that watches the order of events and fails unless the permission check happens *before* the launch, and a test that tries every forbidden program (`cmd.exe`, `powershell.exe`, and the rest) through this new layer and confirms each one is stopped — not just trusting that the bouncer, tested separately, still works.
+
+### Three layers, one of them sealed off
+The code is deliberately built in three layers, like an airlock:
+1. The **public door** (`api.py`) — the only thing the rest of Aether is allowed to talk to.
+2. The **middle** (`app_control`) — organises the work and writes the log.
+3. The **sealed room** (`windows.py`) — the only place allowed to touch the Windows-specific machinery that actually clicks buttons and starts programs.
+
+Nothing outside that sealed room may import the powerful automation tools — and we wrote a test that literally reads every other file to prove none of them do. Keeping the dangerous capability behind one wall means there's only one place to audit when you want to be sure it's used safely.
+
+### A design nicety: the permission list lives in one place
+Notice what's *not* in this code: any list of which programs are allowed. That list lives entirely in the permissions file the bouncer reads. The action code never hardcodes "cmd.exe is bad" — it just asks. So changing what's allowed is a one-line edit to a settings file, never a code change. One source of truth.
+
+### 🧹 An honest mistake in the cleanup
+After proving a launch worked, I closed the test program to tidy up — and closed it *by name*. On Windows 11, Notepad shares one process across all its tabs, so "close Notepad" force-killed a Notepad the user already had open, with unsaved text, and no save prompt. The *tool* did exactly what it was told; the mistake was mine in telling it to close by name when an existing instance was around. Recorded plainly, because the honest log of what went wrong is worth more than a tidy one. The takeaway for the file-operations work coming next: "clean up after yourself" has to mean *only* the thing you created, never anything that was already there.
+
+---

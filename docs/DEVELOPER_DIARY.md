@@ -470,7 +470,7 @@ Brought the whole tree to a clean gate baseline without changing behavior anywhe
 
 - **Mechanical first (96 findings):** `ruff check --select W293,W291,I001 --fix` cleared blank-line-with-whitespace (82), import sorting (11) and trailing whitespace (3) — none can alter behavior. Verified the import sort preserved stt.py's `torch`-before-`faster_whisper` ordering before accepting it. `ruff format` reformatted 11 files.
 - **Dead imports (7):** all confirmed genuinely unused before removal, including `server_module` in test_voice_pipeline.py (grep proved zero uses beyond its own import line; the adjacent `from ...server import app` is what the file actually uses).
-- **The rest (37) by hand**, each chosen as the most conservative option: B904 ×5 in vector_store.py (`from e` — sets `__cause__` only); B007 ×6 → `_`-prefixed; F841 ×3 (kept the side-effecting `task_manager.create(...)` call, dropped only the unused binding; `prev_state` was a genuinely dead read since the `finally` unconditionally sets IDLE); E721 ×2 → `is`; PT011/PT018; C901 in startup.py resolved by extracting `_select_top_task()` with the selection order and fallback unchanged; N806 ×7 renamed (local `with patch(...) as X` bindings only).
+- **The rest (37) by hand**, each chosen as the most conservative option: B904 ×5 in vector*store.py (`from e` — sets `__cause__` only); B007 ×6 → `*`-prefixed; F841 ×3 (kept the side-effecting `task_manager.create(...)`call, dropped only the unused binding;`prev_state`was a genuinely dead read since the`finally`unconditionally sets IDLE); E721 ×2 →`is`; PT011/PT018; C901 in startup.py resolved by extracting `\_select_top_task()`with the selection order and fallback unchanged; N806 ×7 renamed (local`with patch(...) as X` bindings only).
 
 **Deliberate suppressions — where the linter was wrong for this codebase:**
 
@@ -501,11 +501,12 @@ _Outcome:_ Every future edit now starts from a clean, enforced baseline instead 
 **Engineering Notes:**
 Fixed the two compounding defects that had taken the voice pipeline entirely offline, and fixed them at the specification level rather than just in today's environment.
 
-- **CUDA torch, root-caused (DEBT-013):** `pyproject.toml` pinned a bare `torch>=2.0,<3` with no CUDA index, so any resolve takes PyPI's default Windows wheel — the **CPU-only** build. A `.venv` rebuild had done exactly that (`torch 2.12.1+cpu`, `torch.version.cuda = None`), and since `cublas64_12.dll` ships *only* inside the CUDA build's `torch/lib`, ctranslate2 had no cuBLAS to load. Nothing failed at install or import; it only surfaced inside the first real transcription. Fixed with uv's documented per-package index mechanism — `[[tool.uv.index]] name = "pytorch-cu126"` + `[tool.uv.sources]`, `explicit = true` so nothing else resolves from it.
+- **CUDA torch, root-caused (DEBT-013):** `pyproject.toml` pinned a bare `torch>=2.0,<3` with no CUDA index, so any resolve takes PyPI's default Windows wheel — the **CPU-only** build. A `.venv` rebuild had done exactly that (`torch 2.12.1+cpu`, `torch.version.cuda = None`), and since `cublas64_12.dll` ships _only_ inside the CUDA build's `torch/lib`, ctranslate2 had no cuBLAS to load. Nothing failed at install or import; it only surfaced inside the first real transcription. Fixed with uv's documented per-package index mechanism — `[[tool.uv.index]] name = "pytorch-cu126"` + `[tool.uv.sources]`, `explicit = true` so nothing else resolves from it.
 - **Choosing cu126 by verification, not assumption:** the prompt pointed at `windows-validation-log.md` for the exact CUDA version — but that log turns out to be an **unfilled template** (no date, every box blank), so M0's environment validation was evidently never actually performed. Ironically, its Block 6 is `torch.cuda.is_available() == True` — the very check that would have caught this. With no recorded version, I queried the PyTorch indexes directly: cu121/cu124/cu128/cu129 publish **no** torch 2.12+ for cp312/win_amd64; only **cu126** and cu130 do. cu126 is the CUDA 12.x index the V1 spec and setup doc call for, so cu126 it is. (The machine's local toolkit is actually CUDA 13.3, but that is irrelevant — the wheels bundle their own runtime and 12.6 wheels run fine on the newer driver.)
 - **VAD frame size, verified against the model itself (DEBT-014):** the milestone forbade assuming 512, so I swept the installed model: at 16kHz it rejects 160/256/320/**480** ("Input audio chunk is too short") and 640/768/1024/1536, accepting **only 512**. The model states its own contract verbatim — `Provided number of samples is N (Supported values: 256 for 8000 sample rate, 512 for 16000)`. The pipeline sliced to 480 (a 30ms estimate from an older Silero release), so every LISTENING frame raised. Now `VAD_FRAME_SAMPLES = 512`, a named constant, with `vad.py`'s docstring and V1 spec §9.2/§9.3 corrected to match reality.
 
 **Validation (all four requirements met):**
+
 - `torch.cuda.is_available()` → **True** (torch 2.13.0+cu126, `torch.version.cuda` 12.6).
 - **VRAM on Whisper load: 1494 → 3499 MiB (+2005 MiB)**, measured while holding the model rather than after release.
 - **VAD callback driven with real audio at the corrected size: 156 frames, 0 exceptions** (previously every frame raised), 87 detected as speech — and the pipeline advanced **LISTENING → TRANSCRIBING on its own**, meaning silence detection functioned for the first time.
@@ -518,7 +519,7 @@ Fixed the two compounding defects that had taken the voice pipeline entirely off
 
 **Findings — reported, deliberately not fixed:**
 
-- **DEBT-018 (P1) — the wake word cannot be armed by any documented means.** This is now the *sole* blocker to the Voice Milestone. Three defects compound: (1) `.env` holds the literal placeholder `AETHER_VOICE__PORCUPINE_ACCESS_KEY=your-porcupine-key-here` (no real key exists — D-002); (2) `pipeline.py` reads a **different variable entirely**, the bare `os.getenv("PORCUPINE_ACCESS_KEY")`; (3) nothing loads `.env` into `os.environ`, and `VoiceConfig` has no porcupine field at all. So a developer who follows `.env.example` exactly and pastes in a valid key **still gets a disabled wake word**, with only an INFO warning to explain it.
+- **DEBT-018 (P1) — the wake word cannot be armed by any documented means.** This is now the _sole_ blocker to the Voice Milestone. Three defects compound: (1) `.env` holds the literal placeholder `AETHER_VOICE__PORCUPINE_ACCESS_KEY=your-porcupine-key-here` (no real key exists — D-002); (2) `pipeline.py` reads a **different variable entirely**, the bare `os.getenv("PORCUPINE_ACCESS_KEY")`; (3) nothing loads `.env` into `os.environ`, and `VoiceConfig` has no porcupine field at all. So a developer who follows `.env.example` exactly and pastes in a valid key **still gets a disabled wake word**, with only an INFO warning to explain it.
 - **Whisper is loaded twice on startup.** `main.py` explicitly loads vad/wake_word/tts/stt, then calls `pipeline.start()` which loads all four again — visible in the boot log as `used_vram_gb=3.25` followed by `3.68`. Two Whisper instances on a 6GB card is wasteful and an OOM risk. Out of this milestone's stated scope (torch + VAD), so reported only.
 - **`tests/fixtures/test_utterance.wav` is a bad fixture.** It is quiet (RMS −32.2 dBFS) and STT is **nondeterministic** on it — three consecutive runs of the identical file gave `'1, 0, 4, 3, 2, 1...'`, then `'My name is Apple, your name it is.'` twice (Whisper's temperature fallback on poor audio). Its content also does not match the test's own assertion (`hello`/`time`/`aether`). `test_stt_transcription` therefore still fails — but on the fixture, **not** on STT: the transcription itself now demonstrably works. This belongs to the fixture-cleanup milestone (DEBT-006) that M2.1.10 was sequenced ahead of.
 - **Debt register has a duplicate ID:** my DEBT-015 (CI greps) and a newer, Architect-authored DEBT-015 (consolidated tooling gaps, targeted M2.1.11) now coexist. The Architect's supersedes mine; renumbering/removing is theirs to decide, so my new entry took DEBT-018 rather than compound it.
@@ -538,10 +539,11 @@ Fixed the configuration plumbing so a Picovoice key placed in `.env` under the p
 
 - **`.env` was never loaded — two omissions, not one.** The prompt correctly identified that `AetherConfig`'s `SettingsConfigDict` was missing `env_file=".env"` (a specification omission from Milestone M1.2's original config.py, **not** a regression). But adding that alone would not have worked: the custom `settings_customise_sources` receives `dotenv_settings` and **dropped it from the returned source tuple** — a second, deeper instance of the same M1.2 omission. Overriding that method replaces pydantic-settings' entire default source chain, so the dotenv source has to be listed explicitly. Fixed both; `dotenv_settings` now sits between real-env and YAML, giving precedence init > env > `.env` > yaml > secrets (a real exported var still wins over the file, as convention expects).
 - **`VoiceConfig.porcupine_access_key: str | None = None`** added — the field never existed, so even a correctly-loaded `.env` had nowhere to land.
-- **`pipeline.py` no longer bypasses config.** The bare `os.getenv("PORCUPINE_ACCESS_KEY", "dummy_key_if_not_provided")` (which read a *different variable name* than `.env.example` documents) is gone — `grep -rn "os.getenv(.PORCUPINE" services/` returns zero. It now reads `get_config().voice.porcupine_access_key`, populated by the documented `AETHER_VOICE__PORCUPINE_ACCESS_KEY`. The now-unused `import os` was removed to keep ruff clean. This import of `aether.core.config`/`aether.core.exceptions` is fine under the Services boundary contract (which forbids only `aether.memory._stores`, `aether.llm._providers`, `qdrant_client`, `sqlalchemy`) and matches how `main.py` already reads config.
+- **`pipeline.py` no longer bypasses config.** The bare `os.getenv("PORCUPINE_ACCESS_KEY", "dummy_key_if_not_provided")` (which read a _different variable name_ than `.env.example` documents) is gone — `grep -rn "os.getenv(.PORCUPINE" services/` returns zero. It now reads `get_config().voice.porcupine_access_key`, populated by the documented `AETHER_VOICE__PORCUPINE_ACCESS_KEY`. The now-unused `import os` was removed to keep ruff clean. This import of `aether.core.config`/`aether.core.exceptions` is fine under the Services boundary contract (which forbids only `aether.memory._stores`, `aether.llm._providers`, `qdrant_client`, `sqlalchemy`) and matches how `main.py` already reads config.
 - **Loud failure.** `VoicePipeline.__init__` now raises `VoiceError` (`error_code="VOICE_PORCUPINE_KEY_MISSING"`, from the AetherError hierarchy in `aether/core/exceptions.py` — not the stray bare-`Exception` duplicate in `services/voice/models.py`) when the key is missing, empty, or equals the `.env.example` placeholder. That is an unhandled exception at boot, replacing the old quiet `porcupine_wake_word_disabled` INFO line. The message names the fix (console.picovoice.ai, the exact env var) and **never echoes the configured value**, even when reporting it equals the placeholder. The placeholder literal is a named constant (`PORCUPINE_KEY_PLACEHOLDER`) with a comment tying it to `.env.example`.
 
 **Validation (all requirements met):**
+
 - Set `AETHER_VOICE__PORCUPINE_ACCESS_KEY=test-value-12345` in a temp `.env` → `config.voice.porcupine_access_key` resolves to exactly that string.
 - Set it to the exact placeholder → `VoicePipeline.__init__` raises the actionable `VoiceError`, and the message does **not** contain the placeholder value.
 - `grep -rn "os.getenv(.PORCUPINE" services/` → zero matches.
@@ -580,7 +582,7 @@ Corrected two test fixtures against the locked contracts and fixed the two scrip
 - **`test_task_workflow.py` was far staler than the brief** — nine constructs, not one: `AgentTask(instruction=...)`, a `ContextPackage` that was never the agent's context type, `AgentDecision(tool_calls=)`, `create_task()`/`list_tasks()`, `result.output`, an LLM mock carrying `.usage`, `priority="NORMAL"` (never existed), and a `select()` against the Pydantic model.
 - **No assertion was weakened.** Assertions now go through TaskManager's public API, testing the locked `TaskStatus` enum rather than the lower-cased string the manager happens to persist; the completion test moves PENDING → ACTIVE → COMPLETED because the locked state machine forbids the direct jump the old test attempted.
 - **`test_event_flow.py`:** the mock's `list(self, filter, limit)` now mirrors the real `task_filter`/`limit` signature — the defect M2.1.5 identified and left — which then exposed a second stale construct, `ContextPackage(memories=[])` missing five required fields.
-- **`start.ps1`/`stop.ps1` root cause:** `$ErrorActionPreference = "Stop"` plus native `docker compose`, whose *normal* progress output goes to **stderr** — PowerShell 5.1 turns each such line into a terminating error, so a fully successful `up -d` killed the script mid-success. Now judged on **exit code**; both ran end to end, exit 0, unattended, with all data volumes preserved on stop.
+- **`start.ps1`/`stop.ps1` root cause:** `$ErrorActionPreference = "Stop"` plus native `docker compose`, whose _normal_ progress output goes to **stderr** — PowerShell 5.1 turns each such line into a terminating error, so a fully successful `up -d` killed the script mid-success. Now judged on **exit code**; both ran end to end, exit 0, unattended, with all data volumes preserved on stop.
 - **DEBT-011 narrowed:** the corrected tests reach code the broken ones never did, exposing the access violation at **two tests in one process** — the trigger is repeated embedding-model/kernel initialization within one pytest process. A module-scoped fixture removed it: a mitigation, **not** a fix. DEBT-011 stays open.
 
 _Outcome:_ The tests now assert the architecture the code actually has, and the scripts run unattended for the first time since M2.1 — plus DEBT-011 went from "the suite crashes, somehow" to a specific, reproducible trigger.
@@ -596,7 +598,7 @@ Re-tested the full-suite access violation against the now-correct CUDA environme
 
 - **Ran the full integration suite as one invocation, four consecutive times** (not the file-by-file workaround): all 29 tests collected and ran to completion every time, **zero access-violation signatures** in any run. Runs: 27p/2f in 15m38s, then 28p/1f in ~2m19s ×3 (the first run was slow only because it downloaded the models).
 - **The two non-crash failures were characterised and dismissed:** run 1's consolidation failure was a transient HuggingFace CDN timeout downloading `bge-large-en-v1.5` (didn't recur once cached); `test_stt_transcription` fails on the known bad `test_utterance.wav` fixture, not on STT. Neither is the crash.
-- **Directly confirmed the previously-crashing path.** The DEBT-006 finding (under CPU torch) was that the *second* embedding-model init in one process crashed. A minimal reproducer — four `EmbeddingService` loads in one process under CUDA torch — completed cleanly (dim 1024 each, exit 0). The exact operation that faulted before now survives.
+- **Directly confirmed the previously-crashing path.** The DEBT-006 finding (under CPU torch) was that the _second_ embedding-model init in one process crashed. A minimal reproducer — four `EmbeddingService` loads in one process under CUDA torch — completed cleanly (dim 1024 each, exit 0). The exact operation that faulted before now survives.
 - **Root cause, honestly bounded:** the only relevant change between the crashing and clean states is the torch build (`2.12.1+cpu` → `2.13.0+cu126`), so the crash was an artifact of the broken CPU-only wheel. A DLL/ABI mismatch is the plausible mechanism, but since the crash no longer reproduces there is no live traceback to dissect — stated as hypothesis, not proven.
 
 _Outcome:_ DEBT-011 closed. The file-by-file workaround from M2.1.7–M2.1.10 can be retired — the full suite runs in one invocation. Original resolution plan guessed torch-multiprocessing/GPU contention; the real cause was the same broken environment as DEBT-013, resolved by that fix.
@@ -633,5 +635,111 @@ Two retrieval defects, each reproduced against a real store before any code was 
 **Flag for the Architect:** the full-suite one-invocation regression **segfaulted once** — the intermittent DEBT-011 native fault, which pure-Python changes can't cause. DEBT-011's "resolved" status is optimistic; I ran the named-critical regression file-by-file (all passed) and recommended, under DEBT-011, reopening it as "intermittent, mitigated by file-by-file" — the Architect's call, not reopened unilaterally.
 
 _Outcome:_ A stored fact is now reliably retrievable when Qdrant hiccups, and a high-importance fact is no longer buried by a chattier episode — the read-side half of the promise DEBT-009 fixed on the write side.
+
+---
+
+### **Date:** 2026-07-27 5:01 AM
+
+**Task:** Build-System Table & Scoped Process Termination (DEBT-019, DEBT-020) — tooling fixes, validated with the real scripts.
+
+**Engineering Notes:**
+
+- **DEBT-019 (`pyproject.toml`).** Added a real `[build-system]` table (`hatchling`) with an explicit `[tool.hatch.build.targets.wheel] packages = ["aether", "services"]`. The flat layout's two packages match neither each other nor the dist name `aether-os`, so name-based auto-detection can't find them; the former `[tool.setuptools.packages.find]` had no build-system to activate it and was inert. Proven at the root: uninstalled `aether-os`, ran `uv sync` (it _rebuilt and reinstalled_ the editable install), then `import aether.core.kernel` succeeds — the silent stripping that broke `uv run` three times this arc is gone. `en-core-web-sm` is an undeclared, unused stray (imported nowhere) and is correctly not retained.
+- **DEBT-020 (`start.ps1` / `stop.ps1`).** start.ps1 now launches each service as the venv `python.exe` directly (no powershell/uv wrapper) and records PIDs to gitignored `.aether-runtime/service-pids.json`. stop.ps1 stops only those PIDs — each verified as this venv's python first — and prints a manual-check message rather than ever falling back to a blanket name-kill when the file is missing or corrupt. Caught and fixed a parse-breaking bug on the way: em-dashes inside stop.ps1's `Write-Host` strings are UTF-8, but PS 5.1 reads a BOM-less `.ps1` as cp1252 and mangled them so the script wouldn't parse; both scripts are now pure ASCII.
+
+_Outcome:_ ruff / format / mypy --strict / import-linter all green, 189 tests still collect. Real start→stop cycle validated end-to-end: the recorded core was stopped, an unrelated venv python + a recorded non-venv python + a recorded non-python process were all spared, and missing/corrupt PID files each produced the manual-check message while a bystander python survived.
+
+### **Date:** 2026-07-27 7:03 AM
+
+**Milestone:** M2.2 (Security Module — SafetyValidator). The first genuinely new Phase 2 feature after the M2.1.5–M2.1.12 remediation arc: the single rule-based gate every privileged action must pass through, with zero LLM calls by design.
+
+**Engineering Notes:**
+Built `aether/security/` as a peer of `aether/memory/` and `aether/llm/` — four files, four locked methods, no database/Qdrant/Redis dependency (it reads one YAML file and holds it in memory).
+
+- **`models.py`** — `ValidationResult` (frozen; a `field_validator` makes an empty `reason` a construction error, so no decision is ever recorded without a justification — ADR-011 §9), `Permission`, and `DestructiveOperation` (StrEnum, values mirroring `permissions.yaml`).
+- **`_permissions_loader.py`** (private) — parses `.aether/permissions.yaml` into a frozen `PermissionsConfig` with `extra="forbid"` on every section (a misspelled `forbidden_paths` fails loudly rather than silently dropping a rule). Resolves `${USERPROFILE}` here; every failure — missing file, bad YAML, schema mismatch, unresolved env var — is a `ConfigurationError` with an actionable message, never a bare parse traceback.
+- **`validator.py`** — `SafetyValidator`. Loads permissions once at construction and **refuses to construct** if they can't load (a validator that can't read its rules must not exist and silently allow everything). Fail-closed throughout: app launch is an allowlist (unlisted → denied, not merely "not forbidden"); forbidden paths take priority over allow; unrecognized file operations denied; executables matched case-insensitively on the base name (`CMD.EXE`, `cmd.exe`, and a full path all resolve to `cmd.exe`). Destructive file ops on a permitted path are allowed but flagged `requires_confirmation=True`. Every decision logs at INFO (ADR-010 audit trail).
+- **Zero LLM dependency** verified by grep (`llm_router|ModelTier|litellm|anthropic|openai` → 0 matches in `aether/security/`) and by a source-scanning unit test. This is the concrete implementation of the Critical Audit's rejection of an LLM Guardian on cost/latency grounds; the p50<10ms target an LLM could never hit is met with room to spare.
+
+**Testing — 68 tests, near-complete branch coverage (security-critical class):** every `forbidden_launch` and `forbidden_paths` entry proven denied _individually_ (parametrized from the real YAML); allow-list entries allowed; unlisted denied; case + full-path variants; destructive→confirmation; `is_destructive` over every enum value + non-destructive; hidden-file and size-limit branches; all six loader failure modes via the public constructor; and a performance test asserting the p50<10ms / p95<25ms targets. Gates: ruff 0, format clean, mypy --strict 0 (66 files), import-linter 3 kept/0 broken. Full non-integration suite 236 passed (168 prior + 68 new).
+
+**Honest notes for review:**
+
+- Writing the browser tests **caught a real fail-closed gap**: `urlparse` hands back `"not a url at all"` as a "hostname", so a malformed URL was being _allowed_. Fixed in `validate_browser_action` with a hostname-format check — the kind of bug the elevated coverage bar exists to catch.
+- `import yaml` needed a scoped `# type: ignore[import-untyped]` (PyYAML ships no stubs; `types-PyYAML` isn't a project dep and adding it is out of M2.2's file scope).
+- **Recommendation (out of scope, next pass):** add `aether.security` to the import-linter "LLM boundary" contract's `source_modules` so the zero-LLM guarantee is enforced structurally, not only by grep + review. Left untouched because M2.2 is scoped to `aether/security/` and must not edit `pyproject.toml`.
+
+_Outcome:_ The enforcement gate M2.3's PC control will sit behind exists, is proven fail-closed on every path, and adds no LLM cost or latency. `validate_browser_action` is fully implemented and tested now for interface stability though no Phase 2 code calls it (Phase 3). No M2.3 work begun.
+
+---
+
+### **Date:** 2026-07-27 7:40 AM
+
+**Task:** M2.2 hardening (pyproject.toml only) — closes the two follow-ups the M2.2 entry flagged.
+
+**Engineering Notes:**
+
+- **`types-PyYAML` added to dev deps.** Removed the scoped `# type: ignore[import-untyped]` on `import yaml` in `_permissions_loader.py`; mypy --strict stays clean (66 files) with real stubs instead of a suppression.
+- **`aether.security` added to the import-linter "LLM boundary" contract `source_modules`.** The zero-LLM guarantee SafetyValidator depends on is now enforced structurally by CI, not only by the M2.2 grep + review. lint-imports: 3 kept / 0 broken, aether.security in the enforced set.
+- **`DestructiveOperation` StrEnum confirmed deliberate** (vs the prompt's `(str, Enum)`): codebase convention + ruff UP042, identical `.value` behaviour. Reasoning now a one-line comment above the class.
+
+_Outcome:_ ruff 0, format clean, mypy --strict 0, import-linter 3 kept/0 broken, 68 security tests pass. No M2.3 work begun.
+
+---
+
+### **Date:** 2026-07-28 2:38 AM
+
+**Milestone:** M2.3 (PC Control Core — Application Control). First milestone that reaches out and touches the host machine: launch, close, focus, list — every launch gated by SafetyValidator.
+
+**Engineering Notes:**
+New module `aether/pc_control/` (peer of memory/llm/security), three-layer: public `api.py` → private `_control/app_control.py` → private `_adapters/windows.py` (the sole importer of the automation libs).
+
+- **`api.py`** — `PCControlAPI` + the frozen models `PCAction` / `ActionResult` / `ApplicationInfo`. `execute_action()` is the single funnel; for `launch` it `await`s `SafetyValidator.validate_app_launch()` and only dispatches to `_control` if allowed — a denied exe never reaches the adapter. `SafetyValidator` is injected (never constructed), so the gate is mockable. `close`/`focus` resolve a running pid from the executable name and are not launch-gated (terminating/focusing an existing process is not the privileged act launching an arbitrary binary is). `list_applications()` is read-only, ungated, still logged. Models live in api.py per spec; the `api → _control` edge is a local import inside the methods to avoid a cycle (E402-clean).
+- **`_adapters/windows.py`** — pywin32 (already present) does launch (`subprocess.Popen`, shell=False), close (`OpenProcess`+`TerminateProcess`), and list (`EnumWindows` over visible titled windows → name/pid/title); `pywinauto` (lazy-imported, so the module and unit tests load without the automation stack) does focus. Every function catches the specific library exception (`pywintypes.error`, `ProcessNotFoundError`, `ElementNotFoundError`) and returns a structured tuple — no raw exception escapes.
+- **pyproject:** added an `automation` optional-dependency group (`pywinauto`, `pyautogui`, pre-approved per V1 §7.7) and mypy overrides for `pywinauto.*`/`win32*`/`pywintypes` (stubless, scoped exactly like the existing audio-lib overrides).
+
+**Testing — 23 unit tests, mocked adapter + validator:** validate-before-dispatch order proven; a denied launch proven to never reach the adapter; **every `forbidden_launch` entry proven denied at the api layer with the REAL SafetyValidator** (defense in depth, not only inside the validator); allow-list dispatched; list/close/focus against a mocked process list; two architecture source-scans (automation libs only in `windows.py`; nothing outside `pc_control/` imports `_adapters`/`_control`); perf test (p50<500ms/p95<1000ms). Gates: ruff 0, format clean, mypy --strict 0 (72 files), import-linter 3 kept/0 broken. Non-integration suite 259 passed (236 + 23).
+
+**Manual validation (real API, real desktop):** `execute_action(launch notepad.exe)` opened Notepad and returned its pid; `list_applications()` showed notepad.exe running; `execute_action(launch cmd.exe)` was denied with no process started.
+
+**Honest notes for review:**
+
+- **Cleanup incident:** my manual-validation cleanup closed Notepad by name via `TerminateProcess`, which — because Win11 Notepad is single-process/tabbed — force-killed a _pre-existing_ Notepad instance (title showed unsaved changes) rather than only the one I launched. No save prompt. A code-correct action (the API did exactly as asked), but an over-aggressive cleanup choice on my part; flagged, not hidden.
+- **Recommendation (out of scope, follow-up):** add `aether.pc_control` to the import-linter contracts — a "PC control adapter boundary" (only `_adapters.windows` imports pywinauto/pyautogui) and inclusion in the LLM boundary — so §6's constraints are enforced in CI, not only by the source-scan tests here. Left out because this milestone's pyproject scope was the automation deps.
+
+_Outcome:_ Aether can now launch/close/focus/list applications, every launch provably behind SafetyValidator, no path to the OS adapter that bypasses `execute_action`. File operations (M2.4) and system monitoring (M2.5) extend this same module. No M2.4 work begun.
+
+---
+
+### **Date:** 2026-07-29 10:06 AM
+
+**Task:** M2.3 follow-up — PID-only process targeting + two hardenings. (M2.3 was not closed until Part 1.)
+
+**Engineering Notes:**
+- **Part 1 (the blocker) — diagnosis: name resolution DID exist in shipped code.** `PCControlAPI._resolve_process_id` (api.py) matched `executable` to the FIRST running process of that name and drove close/focus; app_control and windows were already PID-only. That first-match is what killed the pre-existing Notepad during M2.3 validation (`execute_action(close, executable='notepad.exe')` → resolved pid 22060 → TerminateProcess). **Fix:** removed `_resolve_process_id` entirely; added `PCAction.process_id`; `execute_action` close/focus now act ONLY on the supplied pid (missing pid → error, never a guess). Name→pid resolution, if ever needed, is an explicit higher-layer decision resolving to one deliberate pid — never implicit here. New regression test launches two real same-named processes (python.exe ×2), closes one by pid, asserts the sibling is untouched.
+- **Part 2:** new import-linter contract "PC control adapter boundary" — pywinauto/pyautogui forbidden everywhere in `aether/` except `_adapters.windows` (allow_indirect_imports=true so `app_control -> windows -> pywinauto` isn't a false positive; the one direct adapter edge is ignored). `aether.pc_control` added to the LLM-boundary contract. lint-imports: 4 kept / 0 broken.
+- **Part 3:** documented `uv sync --all-extras` as the canonical full-env command in README (same "uv makes it match exactly" trap as DEBT-019), plus a standing rule: manual-validation cleanup must act on the specific PID the test created, never a name lookup.
+
+_Outcome:_ ruff 0, format clean, mypy --strict 0 (72 files), import-linter 4 kept/0 broken, non-integration suite 261 passed. M2.3 now closed. No M2.4 work begun.
+
+---
+
+### **Date:** 2026-07-29 10:42 AM
+
+**Milestone:** M2.4 (PC Control Core — File Operations). Search, read, move behind PCControlAPI, every path resolved-then-validated through SafetyValidator; destructive overwrite gated by confirmation_token. No delete — permanently out of scope.
+
+**Engineering Notes:**
+- **`_control/file_ops.py`** (new, private): `FileSearchFilter` / `FileInfo` / `FileContent` + `search_files` (glob/substring, bounded to 1000 candidates), `read_file` (async via aiofiles), `move_file` (`Path.replace` — atomic, overwrites without a separate delete step, acts on exactly the two paths given). Returns candidates; never acts on a search result.
+- **`api.py`**: `PCAction` extended with `move` + explicit `source`/`destination` Path fields (the M2.3 corrected pattern — exact paths, never a name/query resolved internally). `execute_action` gains the move branch; `search_files`/`read_file` added. Every path is `Path.resolve()`d BEFORE `validate_file_operation`. Overwrite (destination exists) → validated as `file.overwrite_existing` and requires `confirmation_token`; without it, denied and nothing is moved.
+- **read truncation vs M2.2 (design decision, flagged):** §6 requires oversized reads be *truncated*, but M2.2's `validate_file_operation` *denies* oversized reads. Resolved by downgrading a **size-only** denial to a truncated read (cap = `max_file_size_mb`), while forbidden / hidden / out-of-bounds denials stay hard failures. To get the cap value I added a read-only `max_file_size_bytes` property to SafetyValidator (`validator.py` — the config owner is the right source; slightly outside §4's listed files, flagged). The size-only detection keys off the validator's denial message ("maximum file size") — a documented coupling; a future hardening could add a status code to `ValidationResult`.
+- **search validates the ROOT only** (forbidden roots denied); the real permissions have no forbidden path nested under a read path. Noted for a future per-candidate check if that ever changes. `aiofiles` added to the mypy overrides (stubless), same pattern as the win32 libs.
+
+**Testing — 31 unit tests (real SafetyValidator + temp configs + real tmp files):** every `forbidden_paths` entry blocked for read/search/move; path traversal (`../..`) blocked after resolution; oversized→truncated and within-limit→not; hidden denied then allowed; overwrite denied without token / permitted with; **move proven to act on its exact source while similar-named siblings (`report.txt.bak`, `report2.txt`) survive**; a no-delete source-scan. Gates: ruff 0, format 0, mypy --strict 0 (73 files), import-linter 4 kept/0 broken. Non-integration suite 292 passed.
+
+**Manual (real config, scratch-only):** search in a Documents/Aether scratch dir → results; read `C:\Windows\system.ini` → denied; move to an existing destination without a token → denied (source+dest untouched), with a token → overwritten. Cleanup removed only the exact scratch paths the run created — the M2.3 standing rule honored, no pre-existing file touched.
+
+_Outcome:_ Aether can search/read/move within permitted directories, every path resolved-then-validated, destructive overwrite token-gated, no delete capability anywhere in the module. No M2.5 work begun.
+
+---
 
 _(End of current log. Subsequent entries will be appended upon the completion of future milestones.)_

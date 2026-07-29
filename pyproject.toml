@@ -45,12 +45,33 @@ voice = [
     "kokoro>=0.7,<1",
     "soundfile>=0.12,<1",
 ]
+# Windows automation stack (M2.3 / V1_TECHNICAL_SPECIFICATION.md Section 7.7).
+# Pre-approved; used only inside aether/pc_control/_adapters/windows.py. pywin32
+# (already present transitively) covers launch/close/list; pywinauto drives
+# window focus.
+automation = [
+    "pywinauto>=0.6,<1",
+    "pyautogui>=0.9,<1",
+]
 
 [project.scripts]
 aether = "aether.__main__:main"
 
-[tool.setuptools.packages.find]
-include = ["aether*", "services*"]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# The build backend (DEBT-019). Without a [build-system] table, uv did not
+# recognise the project as installable and silently dropped the editable
+# `aether-os` install on every `uv sync`, breaking `uv run` immediately after —
+# worked around by hand three times across this remediation arc before being
+# fixed here. Explicit package list because this is a FLAT layout with two
+# top-level packages (`aether`, `services`), neither of which matches the
+# distribution name `aether-os`, so hatchling's name-based auto-detection cannot
+# find them. (Replaces the former `[tool.setuptools.packages.find]`, which had
+# no build-system to activate it and was therefore inert.)
+[tool.hatch.build.targets.wheel]
+packages = ["aether", "services"]
 
 # Dev dependencies in PEP 735 form (D-001). Migrated from the deprecated
 # `[tool.uv] dev-dependencies`, which uv 0.11+ warns on and will remove.
@@ -66,6 +87,9 @@ dev = [
     "import-linter>=2.0,<3",
     "pre-commit>=3.8,<4",
     "aiofiles>=23.0,<25",
+    # Type stubs for PyYAML (M2.2 hardening). aether/security/_permissions_loader
+    # imports yaml directly; without these, mypy --strict flags import-untyped.
+    "types-pyyaml>=6.0,<7",
 ]
 
 # PyTorch CUDA 12.x build (M2.1.10 / DEBT-013).
@@ -140,6 +164,18 @@ module = [
     "sounddevice.*",
     "kokoro.*",
     "faster_whisper.*",
+    # Windows automation stack (M2.3). Neither pywinauto nor the pywin32
+    # win32* extension modules ship type stubs; scoped like the audio libs
+    # above so the strict global ignore_missing_imports = false still governs
+    # every other import.
+    "pywinauto.*",
+    "win32api",
+    "win32gui",
+    "win32process",
+    "pywintypes",
+    # aiofiles (M2.4 async file reads) ships no type stubs.
+    "aiofiles",
+    "aiofiles.*",
 ]
 ignore_missing_imports = true
 
@@ -189,6 +225,10 @@ forbidden_modules = [
 name = "LLM boundary: no direct provider access"
 type = "forbidden"
 allow_indirect_imports = true
+# aether.security added (M2.2 hardening) and aether.pc_control added (M2.3
+# hardening): both are rule-based / OS-facing modules with no business importing
+# an LLM provider. Enforced here structurally in CI, matching how aether.security
+# was added, not only by grep + review.
 source_modules = [
     "aether.agents",
     "aether.memory",
@@ -196,6 +236,8 @@ source_modules = [
     "aether.tasks",
     "aether.session",
     "aether.interfaces",
+    "aether.security",
+    "aether.pc_control",
 ]
 forbidden_modules = [
     "aether.llm._providers",
@@ -203,6 +245,24 @@ forbidden_modules = [
     "openai",
     "litellm",
     "google",
+]
+
+[[tool.importlinter.contracts]]
+name = "PC control adapter boundary: automation libraries confined to the Windows adapter"
+type = "forbidden"
+# Only DIRECT imports are forbidden (allow_indirect_imports = true), same as the
+# boundary contracts above: app_control -> windows -> pywinauto is the sanctioned
+# transitive path and must not be flagged. The one legitimate DIRECT importer is
+# _adapters/windows.py, whose lazy focus imports are ignored below. Any OTHER
+# aether module importing pywinauto/pyautogui breaks this contract (M2.3
+# hardening — replaces reliance on the two source-scan unit tests alone).
+allow_indirect_imports = true
+source_modules = ["aether"]
+forbidden_modules = ["pywinauto", "pyautogui"]
+# pywinauto is an external package, so grimp records all of the adapter's
+# `from pywinauto[...] import` lines as the single edge below.
+ignore_imports = [
+    "aether.pc_control._adapters.windows -> pywinauto",
 ]
 
 [[tool.importlinter.contracts]]
