@@ -30,9 +30,15 @@ class PCAction(BaseModel):
         action_type: One of ``launch``, ``close``, ``focus``.
         executable: The target executable. For ``launch`` it is what gets
             launched (and what ``SafetyValidator`` checks). For ``close`` and
-            ``focus`` it names the running application to act on; the concrete
-            process id is resolved from the live process list.
+            ``focus`` it is descriptive only (logging/context) — the action
+            targets ``process_id``, never a name lookup.
         args: Command-line arguments (``launch`` only).
+        process_id: The specific process to act on. REQUIRED for ``close`` and
+            ``focus`` — these operate on exactly this pid and nothing else.
+            There is deliberately no name-to-pid resolution here: turning a
+            spoken "close notepad" into one specific pid is a higher-layer
+            decision a future agent makes explicitly, never an implicit
+            first-match inside this low-level API. Ignored for ``launch``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -40,6 +46,7 @@ class PCAction(BaseModel):
     action_type: Literal["launch", "close", "focus"]
     executable: str
     args: list[str] = []
+    process_id: int | None = None
 
 
 class ActionResult(BaseModel):
@@ -93,9 +100,11 @@ class PCControlAPI:
         For ``launch``, ``SafetyValidator.validate_app_launch()`` is called and
         must allow the executable BEFORE any call into the private control layer
         — an unlisted or forbidden executable is denied and nothing is launched.
-        ``close`` and ``focus`` operate on an already-running process (resolved
-        from ``executable``) and are not launch-gated: terminating or focusing a
-        process is not the privileged act that launching an arbitrary binary is.
+        ``close`` and ``focus`` operate ONLY on ``action.process_id`` — the exact
+        pid supplied — with no name-to-pid resolution anywhere in the call chain;
+        a missing pid is an error, never a "best guess" first match. They are not
+        launch-gated: terminating or focusing an already-running process is not
+        the privileged act that launching an arbitrary binary is.
 
         Args:
             action: The action to perform.
@@ -135,24 +144,28 @@ class PCControlAPI:
             return app_control.launch_application(action.executable, action.args)
 
         if action.action_type == "close":
-            process_id = self._resolve_process_id(action.executable)
-            if process_id is None:
+            if action.process_id is None:
                 return ActionResult(
                     success=False,
-                    message=f"No running process named '{action.executable}' to close.",
+                    message=(
+                        "close requires an explicit process_id; this API targets "
+                        "one specific pid and never resolves a name to a process."
+                    ),
                     process_id=None,
                 )
-            return app_control.close_application(process_id)
+            return app_control.close_application(action.process_id)
 
         # action_type == "focus" (exhaustive over the Literal)
-        process_id = self._resolve_process_id(action.executable)
-        if process_id is None:
+        if action.process_id is None:
             return ActionResult(
                 success=False,
-                message=f"No running process named '{action.executable}' to focus.",
+                message=(
+                    "focus requires an explicit process_id; this API targets one "
+                    "specific pid and never resolves a name to a process."
+                ),
                 process_id=None,
             )
-        return app_control.focus_application(process_id)
+        return app_control.focus_application(action.process_id)
 
     async def list_applications(self) -> list[ApplicationInfo]:
         """Return the currently running applications.
@@ -168,24 +181,3 @@ class PCControlAPI:
         apps = app_control.list_running_applications()
         logger.info("pc_control.list_applications", count=len(apps))
         return apps
-
-    @staticmethod
-    def _resolve_process_id(executable: str) -> int | None:
-        """Resolve a running process id from an executable name (first match).
-
-        Args:
-            executable: An executable name or path; matched on the base name,
-                case-insensitively.
-
-        Returns:
-            The process id of the first running match, or None.
-        """
-        from pathlib import PureWindowsPath
-
-        from aether.pc_control._control import app_control
-
-        target = PureWindowsPath(executable).name.lower()
-        for app in app_control.list_running_applications():
-            if app.name.lower() == target:
-                return app.process_id
-        return None

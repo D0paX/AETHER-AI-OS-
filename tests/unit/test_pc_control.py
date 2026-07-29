@@ -9,6 +9,7 @@ call — and that a denied launch reaches the adapter not at all.
 Pure unit tests — no database, Qdrant, or Redis fixture.
 """
 
+import os
 import statistics
 import time
 from pathlib import Path
@@ -126,42 +127,84 @@ async def test_list_applications_returns_adapter_data() -> None:
 
 
 # =============================================================================
-# close / focus — resolve pid by name, then act
+# close / focus — target the EXACT pid supplied, never a name lookup
 # =============================================================================
-async def test_close_resolves_pid_and_calls_adapter() -> None:
+async def test_close_targets_exact_pid_no_name_lookup() -> None:
     api = PCControlAPI(_mock_validator(_allow()))
-    running = [ApplicationInfo(name="notepad.exe", process_id=909, window_title="x")]
     with (
-        patch(f"{_ADAPTER}.windows_list_processes", return_value=running),
+        # If any name resolution existed, it would consult the process list.
+        patch(f"{_ADAPTER}.windows_list_processes") as wl,
         patch(f"{_ADAPTER}.windows_close", return_value=(True, "terminated")) as wc,
     ):
-        result = await api.execute_action(PCAction(action_type="close", executable="notepad.exe"))
+        result = await api.execute_action(
+            PCAction(action_type="close", executable="notepad.exe", process_id=909)
+        )
     wc.assert_called_once_with(909)
+    wl.assert_not_called()  # no name-to-pid resolution anywhere
     assert result.success is True
     assert result.process_id == 909
 
 
-async def test_close_unknown_process_reports_failure() -> None:
+async def test_close_without_pid_reports_failure_and_does_not_dispatch() -> None:
+    api = PCControlAPI(_mock_validator(_allow()))
+    with patch(f"{_ADAPTER}.windows_close") as wc:
+        result = await api.execute_action(
+            PCAction(action_type="close", executable="notepad.exe")  # no process_id
+        )
+    wc.assert_not_called()
+    assert result.success is False
+    assert "process_id" in result.message
+
+
+async def test_focus_targets_exact_pid_no_name_lookup() -> None:
     api = PCControlAPI(_mock_validator(_allow()))
     with (
-        patch(f"{_ADAPTER}.windows_list_processes", return_value=[]),
-        patch(f"{_ADAPTER}.windows_close") as wc,
+        patch(f"{_ADAPTER}.windows_list_processes") as wl,
+        patch(f"{_ADAPTER}.windows_focus", return_value=(True, "focused")) as wf,
     ):
-        result = await api.execute_action(PCAction(action_type="close", executable="nothere.exe"))
-    wc.assert_not_called()
+        result = await api.execute_action(
+            PCAction(action_type="focus", executable="notepad.exe", process_id=515)
+        )
+    wf.assert_called_once_with(515)
+    wl.assert_not_called()
+    assert result.success is True
+
+
+async def test_focus_without_pid_reports_failure() -> None:
+    api = PCControlAPI(_mock_validator(_allow()))
+    with patch(f"{_ADAPTER}.windows_focus") as wf:
+        result = await api.execute_action(PCAction(action_type="focus", executable="notepad.exe"))
+    wf.assert_not_called()
     assert result.success is False
 
 
-async def test_focus_resolves_pid_and_calls_adapter() -> None:
-    api = PCControlAPI(_mock_validator(_allow()))
-    running = [ApplicationInfo(name="notepad.exe", process_id=515, window_title="x")]
-    with (
-        patch(f"{_ADAPTER}.windows_list_processes", return_value=running),
-        patch(f"{_ADAPTER}.windows_focus", return_value=(True, "focused")) as wf,
-    ):
-        result = await api.execute_action(PCAction(action_type="focus", executable="NOTEPAD.EXE"))
-    wf.assert_called_once_with(515)
-    assert result.success is True
+@pytest.mark.skipif(os.name != "nt", reason="exercises the real Windows adapter")
+def test_close_by_pid_does_not_affect_same_name_sibling() -> None:
+    """close targets exactly one pid: a same-named sibling process is untouched.
+
+    Launches two real, benign processes with the SAME executable name
+    (python.exe), closes only the first by its specific pid, and asserts the
+    second is still alive. This is the regression guard for the M2.3 incident
+    where a name-based close killed an unrelated same-named process.
+    """
+    import subprocess
+    import sys
+
+    from aether.pc_control._adapters import windows
+
+    sleeper = ["import time", "time.sleep(30)"]
+    p1 = subprocess.Popen([sys.executable, "-c", "; ".join(sleeper)])
+    p2 = subprocess.Popen([sys.executable, "-c", "; ".join(sleeper)])
+    try:
+        ok, message = windows.windows_close(p1.pid)
+        assert ok, message
+        assert p1.wait(timeout=5) is not None  # the targeted process died
+        assert p2.poll() is None, "the same-named sibling must be untouched"
+    finally:
+        for proc in (p1, p2):
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=5)
 
 
 # =============================================================================

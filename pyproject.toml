@@ -222,9 +222,10 @@ forbidden_modules = [
 name = "LLM boundary: no direct provider access"
 type = "forbidden"
 allow_indirect_imports = true
-# aether.security added (M2.2 hardening): SafetyValidator's whole architectural
-# point is zero LLM calls (rule-based gate, per the Critical Audit's rejection of
-# an LLM Guardian). Enforced here structurally in CI, not only by grep + review.
+# aether.security added (M2.2 hardening) and aether.pc_control added (M2.3
+# hardening): both are rule-based / OS-facing modules with no business importing
+# an LLM provider. Enforced here structurally in CI, matching how aether.security
+# was added, not only by grep + review.
 source_modules = [
     "aether.agents",
     "aether.memory",
@@ -233,6 +234,7 @@ source_modules = [
     "aether.session",
     "aether.interfaces",
     "aether.security",
+    "aether.pc_control",
 ]
 forbidden_modules = [
     "aether.llm._providers",
@@ -240,6 +242,24 @@ forbidden_modules = [
     "openai",
     "litellm",
     "google",
+]
+
+[[tool.importlinter.contracts]]
+name = "PC control adapter boundary: automation libraries confined to the Windows adapter"
+type = "forbidden"
+# Only DIRECT imports are forbidden (allow_indirect_imports = true), same as the
+# boundary contracts above: app_control -> windows -> pywinauto is the sanctioned
+# transitive path and must not be flagged. The one legitimate DIRECT importer is
+# _adapters/windows.py, whose lazy focus imports are ignored below. Any OTHER
+# aether module importing pywinauto/pyautogui breaks this contract (M2.3
+# hardening — replaces reliance on the two source-scan unit tests alone).
+allow_indirect_imports = true
+source_modules = ["aether"]
+forbidden_modules = ["pywinauto", "pyautogui"]
+# pywinauto is an external package, so grimp records all of the adapter's
+# `from pywinauto[...] import` lines as the single edge below.
+ignore_imports = [
+    "aether.pc_control._adapters.windows -> pywinauto",
 ]
 
 [[tool.importlinter.contracts]]
