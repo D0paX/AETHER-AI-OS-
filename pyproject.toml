@@ -173,6 +173,9 @@ module = [
     "win32gui",
     "win32process",
     "pywintypes",
+    # aiofiles (M2.4 async file reads) ships no type stubs.
+    "aiofiles",
+    "aiofiles.*",
 ]
 ignore_missing_imports = true
 

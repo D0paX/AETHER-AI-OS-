@@ -138,6 +138,16 @@ class SafetyValidator:
             allowed_launch=len(self._allowed_launch),
         )
 
+    @property
+    def max_file_size_bytes(self) -> int:
+        """The configured ``max_file_size_mb`` in bytes (read-only).
+
+        Exposed so a caller that must *truncate* an oversized read to the policy
+        limit (M2.4 read_file) can honor the same number this validator enforces,
+        rather than hardcoding it or re-reading the config.
+        """
+        return self._max_file_size_bytes
+
     # -- decision helper --------------------------------------------------------
 
     def _decide(

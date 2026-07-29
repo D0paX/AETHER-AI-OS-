@@ -832,6 +832,26 @@ The rule bar for security code is deliberately punishing: prove *every single* f
 
 ---
 
+## Milestone 2.4 (M2.4): Aether Can Touch Your Files — Carefully
+
+*Status: Complete. Aether can now find, read, and move files inside the folders you've permitted — and it cannot read, move, or overwrite anything outside them. It cannot delete, at all, ever.*
+
+Opening programs was last time; this time it's your files. Same iron rule as before — one door, and the bouncer checks it every time — plus two habits specific to files.
+
+### Habit one: figure out where a path *really* points before deciding
+Paths lie. `Documents/../../Windows/secret.txt` looks like it's in your Documents folder, but the `../..` climbs out of it and lands in Windows. So before Aether asks "is this allowed?", it first **resolves** the path — follows every `..` and shortcut to the real, final location — and validates *that*. Checking the path you were handed instead of the path it actually points to is how sandboxes get escaped, so this happens with no exceptions. We wrote a test that hands it exactly that kind of climb-out path and confirms it's blocked.
+
+### Habit two: overwriting needs a second "yes"
+Moving a file to a brand-new name is ordinary. Moving it *on top of* a file that already exists destroys whatever was there — so that specific case requires a **confirmation token**: an explicit second yes that a higher layer only supplies after the user agrees. No token, no overwrite — the operation is refused and nothing changes. And notably: there is **no delete feature** anywhere in this module, by design. It's not disabled or hidden; it simply doesn't exist, and a test scans the code to prove no delete function crept in.
+
+### The move that only ever touches what you named
+Carrying the last milestone's hard-won lesson forward: the "move" operation acts on the **exact file you point it at** — never a name it looked up. We proved it by putting three similarly-named files side by side (`report.txt`, `report.txt.bak`, `report2.txt`), moving only `report.txt`, and confirming the other two were completely untouched. A previous milestone destroyed unrelated data through a name-based lookup; this design makes that class of mistake impossible here.
+
+### ⚖️ An honest engineering compromise
+Two rules gently disagreed. An earlier rule says "refuse files bigger than the limit." This milestone says "for reading, don't refuse a big file — just hand back the first chunk and mark it as trimmed." Both are reasonable. We resolved it in reading's favor (you get a usable preview of a large log instead of a flat "no"), but *only* for the size question — a file in a forbidden folder is still a hard no. The one inelegant part: to tell "too big" apart from "not allowed," the code currently reads the bouncer's written explanation. It works and it's safe, but it's a small knot we've flagged to tidy later with a cleaner signal. Writing down the compromise, and its rough edge, beats pretending the two rules never disagreed.
+
+---
+
 ## Milestone 2.3 (M2.3): Aether Reaches Out and Touches the Computer
 
 *Status: Complete. For the first time, Aether can actually open, close, focus, and list real programs on your machine — and it cannot open one the rules forbid.*

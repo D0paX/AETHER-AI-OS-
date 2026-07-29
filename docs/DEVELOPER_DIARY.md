@@ -724,4 +724,22 @@ _Outcome:_ ruff 0, format clean, mypy --strict 0 (72 files), import-linter 4 kep
 
 ---
 
+### **Date:** 2026-07-29 10:42 AM
+
+**Milestone:** M2.4 (PC Control Core — File Operations). Search, read, move behind PCControlAPI, every path resolved-then-validated through SafetyValidator; destructive overwrite gated by confirmation_token. No delete — permanently out of scope.
+
+**Engineering Notes:**
+- **`_control/file_ops.py`** (new, private): `FileSearchFilter` / `FileInfo` / `FileContent` + `search_files` (glob/substring, bounded to 1000 candidates), `read_file` (async via aiofiles), `move_file` (`Path.replace` — atomic, overwrites without a separate delete step, acts on exactly the two paths given). Returns candidates; never acts on a search result.
+- **`api.py`**: `PCAction` extended with `move` + explicit `source`/`destination` Path fields (the M2.3 corrected pattern — exact paths, never a name/query resolved internally). `execute_action` gains the move branch; `search_files`/`read_file` added. Every path is `Path.resolve()`d BEFORE `validate_file_operation`. Overwrite (destination exists) → validated as `file.overwrite_existing` and requires `confirmation_token`; without it, denied and nothing is moved.
+- **read truncation vs M2.2 (design decision, flagged):** §6 requires oversized reads be *truncated*, but M2.2's `validate_file_operation` *denies* oversized reads. Resolved by downgrading a **size-only** denial to a truncated read (cap = `max_file_size_mb`), while forbidden / hidden / out-of-bounds denials stay hard failures. To get the cap value I added a read-only `max_file_size_bytes` property to SafetyValidator (`validator.py` — the config owner is the right source; slightly outside §4's listed files, flagged). The size-only detection keys off the validator's denial message ("maximum file size") — a documented coupling; a future hardening could add a status code to `ValidationResult`.
+- **search validates the ROOT only** (forbidden roots denied); the real permissions have no forbidden path nested under a read path. Noted for a future per-candidate check if that ever changes. `aiofiles` added to the mypy overrides (stubless), same pattern as the win32 libs.
+
+**Testing — 31 unit tests (real SafetyValidator + temp configs + real tmp files):** every `forbidden_paths` entry blocked for read/search/move; path traversal (`../..`) blocked after resolution; oversized→truncated and within-limit→not; hidden denied then allowed; overwrite denied without token / permitted with; **move proven to act on its exact source while similar-named siblings (`report.txt.bak`, `report2.txt`) survive**; a no-delete source-scan. Gates: ruff 0, format 0, mypy --strict 0 (73 files), import-linter 4 kept/0 broken. Non-integration suite 292 passed.
+
+**Manual (real config, scratch-only):** search in a Documents/Aether scratch dir → results; read `C:\Windows\system.ini` → denied; move to an existing destination without a token → denied (source+dest untouched), with a token → overwritten. Cleanup removed only the exact scratch paths the run created — the M2.3 standing rule honored, no pre-existing file touched.
+
+_Outcome:_ Aether can search/read/move within permitted directories, every path resolved-then-validated, destructive overwrite token-gated, no delete capability anywhere in the module. No M2.5 work begun.
+
+---
+
 _(End of current log. Subsequent entries will be appended upon the completion of future milestones.)_
