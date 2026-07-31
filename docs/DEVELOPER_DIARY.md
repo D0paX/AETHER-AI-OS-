@@ -742,4 +742,18 @@ _Outcome:_ Aether can search/read/move within permitted directories, every path 
 
 ---
 
+### **Date:** 2026-07-31 6:48 PM
+
+**Task:** CI fix — "Aether CI / Unit Tests" red on Linux while every other check was green. Investigation + two narrow fixes. (gh CLI present but unauthenticated, so the GitHub run log couldn't be fetched; diagnosed by workflow inspection + local reproduction.)
+
+**Root cause (primary, reproduced):** the session-scoped autouse DB-safety guard (`tests/conftest_db_guard.py`, M2.1.7) raises `TestDatabaseSafetyError` at setup when `database.test_url` is empty. `config/local.yaml` supplies it locally but is gitignored, so it is absent on the CI runner → the guard aborts the entire unit-tests session before any test runs. Only that job runs pytest, which is why everything else stayed green. Reproduced locally by hiding `local.yaml`: even the DB-free `test_safety_validator` errors at setup. **Not DEBT-011, not GPU** (no torch/cuda imports anywhere in tests/unit).
+
+**Root cause (secondary, latent, would surface once the guard is fixed):** `aether/pc_control/_adapters/windows.py` imported pywin32 (`win32api`, …) at module top. pywin32 is Windows-only and not a declared dep, so on the Linux runner importing the module (which `test_pc_control.py` does via `patch(...)`) raised `ModuleNotFoundError`.
+
+**Fixes (both narrow):**
+- **`.github/workflows/ci.yml`:** set `AETHER_TEST_DATABASE_URL` (a test-marked URL) on the unit-tests step. These paths never open a connection; the guard only string-checks for a `test`-marked URL, so this satisfies it without provisioning a database.
+- **`windows.py`:** moved the pywin32 imports from module top into the functions that use them (lazy, matching the existing pywinauto pattern). The adapter now imports cleanly on any OS; win32 is needed only at real call time, which the unit tests mock.
+
+**Validation:** gates green (ruff/format/mypy --strict 73/import-linter 4-kept-0-broken); `windows.py` proven to import with pywin32 blocked; the exact CI command with `local.yaml` hidden + the env var + `CUDA_VISIBLE_DEVICES` cleared → **292 passed, exit 0**. Could NOT confirm green on GitHub itself — gh is unauthenticated (no token), so `gh run watch` is unavailable; local reproduction is the strongest available evidence.
+
 _(End of current log. Subsequent entries will be appended upon the completion of future milestones.)_

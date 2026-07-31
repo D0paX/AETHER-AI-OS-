@@ -7,19 +7,15 @@ where every launch is gated by ``SafetyValidator``.
 
 Every function catches the SPECIFIC exceptions the underlying library raises
 (never a bare ``except``) and returns a structured value; a raw OS/library
-exception never propagates to the caller. Launch, close, and process listing use
-the pywin32 process APIs (already present); focus uses ``pywinauto`` (imported
-lazily so the module loads, and unit tests run, without the automation stack
-installed).
+exception never propagates to the caller. Launch uses stdlib ``subprocess``;
+close, process listing, and focus use the pywin32 / ``pywinauto`` APIs, all
+imported LAZILY inside the functions that use them so this module imports
+cleanly on any OS (pywin32 is Windows-only). That is what lets the unit tests —
+which mock this adapter — run on the Linux CI runner.
 """
 
 import os
 import subprocess
-
-import pywintypes
-import win32api
-import win32gui
-import win32process
 
 from aether.core.logging import get_logger
 from aether.pc_control.api import ApplicationInfo
@@ -62,6 +58,10 @@ def windows_close(process_id: int) -> tuple[bool, str]:
     Returns:
         (True, message) on success; (False, message) on failure.
     """
+    import pywintypes
+    import win32api
+    import win32process
+
     try:
         handle = win32api.OpenProcess(_PROCESS_TERMINATE, False, process_id)
     except pywintypes.error as exc:
@@ -107,6 +107,10 @@ def windows_list_processes() -> list[ApplicationInfo]:
     Returns:
         One ApplicationInfo per visible top-level window that has a title.
     """
+    import pywintypes
+    import win32gui
+    import win32process
+
     apps: list[ApplicationInfo] = []
 
     def _collect(hwnd: int, _extra: object) -> bool:
@@ -134,6 +138,10 @@ def windows_list_processes() -> list[ApplicationInfo]:
 
 def _process_name(process_id: int) -> str:
     """Return a process's executable base name, or '' if it cannot be read."""
+    import pywintypes
+    import win32api
+    import win32process
+
     try:
         handle = win32api.OpenProcess(
             _PROCESS_QUERY_INFORMATION | _PROCESS_VM_READ, False, process_id
