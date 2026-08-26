@@ -92,3 +92,20 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - run: uv sync
       - run: uv run pytest tests/unit/ tests/contracts/ tests/architecture/ -v --tb=short
+        env:
+          # These paths are pure unit tests and never open a database
+          # connection. But the session-scoped, autouse DB-safety guard
+          # (M2.1.7, tests/conftest_db_guard.py) refuses to run the whole
+          # session unless a test-marked database URL is configured — and
+          # config/local.yaml, which sets it locally, is gitignored, so it is
+          # absent on CI (database.test_url defaults to "", which the guard
+          # rejects). Supplying a test-marked URL satisfies the guard's string
+          # check; nothing dials it, because no test in these paths connects.
+          AETHER_TEST_DATABASE_URL: "postgresql+asyncpg://aether:test@localhost:5432/aether_test"
+          # .aether/permissions.yaml expands ${USERPROFILE} in its path lists;
+          # the Linux runner has no USERPROFILE, so the loader would reject the
+          # unresolved variable and every SafetyValidator(real permissions) test
+          # would fail. /home/runner is the runner's real home; the Documents
+          # subpaths need not exist because these tests check allow/deny logic,
+          # not filesystem I/O.
+          USERPROFILE: /home/runner

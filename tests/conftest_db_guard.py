@@ -49,7 +49,7 @@ ACTIVE_QDRANT_ENV_VAR = "AETHER_QDRANT__COLLECTION"
 ACTIVE_REDIS_ENV_VAR = "AETHER_REDIS__URL"
 
 
-class TestDatabaseSafetyError(Exception):
+class DatabaseSafetyError(Exception):
     """Raised when the configured database is not a safe, clearly-marked test DB.
 
     Deliberately not an AetherError: this is test-harness infrastructure, not
@@ -71,12 +71,12 @@ def verify_test_database_url(url: str) -> None:
         url: The database URL the test suite is configured to use.
 
     Raises:
-        TestDatabaseSafetyError: If url is empty, unparseable, or its database
+        DatabaseSafetyError: If url is empty, unparseable, or its database
             name lacks a clear test marker. The message is actionable and never
             includes the URL's password.
     """
     if not url:
-        raise TestDatabaseSafetyError(
+        raise DatabaseSafetyError(
             "No test database URL is configured. Set database.test_url in "
             "config/local.yaml or the AETHER_TEST_DATABASE_URL environment "
             "variable to a dedicated test database (its name must contain "
@@ -86,7 +86,7 @@ def verify_test_database_url(url: str) -> None:
     try:
         url_obj = make_url(url)
     except Exception as e:  # noqa: BLE001 - re-raised as a safety error, not swallowed
-        raise TestDatabaseSafetyError(
+        raise DatabaseSafetyError(
             "The configured test database URL could not be parsed. Fix "
             f"database.test_url / {TEST_DB_ENV_VAR}. Refusing to run tests. "
             f"(parse error: {type(e).__name__})"
@@ -98,7 +98,7 @@ def verify_test_database_url(url: str) -> None:
     db_name = url_obj.database or ""
     if TEST_DB_MARKER not in db_name.lower():
         # Never echo the password; show only host/port/db-name.
-        raise TestDatabaseSafetyError(
+        raise DatabaseSafetyError(
             f"Refusing to run tests: the configured database name {db_name!r} "
             f"(host {url_obj.host}:{url_obj.port}) does not look like a test "
             f"database. Its name must contain '{TEST_DB_MARKER}' (e.g. "
@@ -118,17 +118,17 @@ def verify_test_qdrant_collection(collection_name: str) -> None:
         collection_name: The Qdrant collection the test suite is configured to use.
 
     Raises:
-        TestDatabaseSafetyError: If the name is empty or lacks a 'test' marker.
+        DatabaseSafetyError: If the name is empty or lacks a 'test' marker.
     """
     if not collection_name:
-        raise TestDatabaseSafetyError(
+        raise DatabaseSafetyError(
             "No test Qdrant collection is configured. Set qdrant.test_collection "
             f"in config or the {TEST_QDRANT_ENV_VAR} environment variable to a "
             f"name containing '{TEST_DB_MARKER}' (e.g. 'episodic_memory_test'). "
             "Refusing to run tests."
         )
     if TEST_DB_MARKER not in collection_name.lower():
-        raise TestDatabaseSafetyError(
+        raise DatabaseSafetyError(
             f"Refusing to run tests: the configured Qdrant collection "
             f"{collection_name!r} does not look like a test collection. Its name "
             f"must contain '{TEST_DB_MARKER}' (e.g. 'episodic_memory_test'). This "
@@ -145,7 +145,7 @@ def redis_db_index(url: str) -> int:
     try:
         return int(path)
     except ValueError as e:
-        raise TestDatabaseSafetyError(
+        raise DatabaseSafetyError(
             f"Could not determine the Redis DB index from the configured test "
             f"URL (path segment {path!r} is not an integer). Refusing to run tests."
         ) from e
@@ -160,10 +160,10 @@ def verify_test_redis_db_index(db_index: int) -> None:
         db_index: The Redis logical DB index the test suite is configured to use.
 
     Raises:
-        TestDatabaseSafetyError: If db_index is the production index (0).
+        DatabaseSafetyError: If db_index is the production index (0).
     """
     if db_index == PRODUCTION_REDIS_DB_INDEX:
-        raise TestDatabaseSafetyError(
+        raise DatabaseSafetyError(
             f"Refusing to run tests: Redis DB index {db_index} is the production "
             f"default. Tests must use a non-zero index (e.g. 1). Set redis.test_url "
             f"or {TEST_REDIS_ENV_VAR}. This guard exists so tests can never write "
@@ -207,7 +207,7 @@ def enforce_test_datastores() -> str:
         provision the test database.
 
     Raises:
-        TestDatabaseSafetyError: If any configured or resulting target is not a
+        DatabaseSafetyError: If any configured or resulting target is not a
             clearly-marked test resource.
     """
     test_db_url = resolve_test_database_url()
