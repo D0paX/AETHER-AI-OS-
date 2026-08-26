@@ -102,3 +102,10 @@ jobs:
           # rejects). Supplying a test-marked URL satisfies the guard's string
           # check; nothing dials it, because no test in these paths connects.
           AETHER_TEST_DATABASE_URL: "postgresql+asyncpg://aether:test@localhost:5432/aether_test"
+          # .aether/permissions.yaml expands ${USERPROFILE} in its path lists;
+          # the Linux runner has no USERPROFILE, so the loader would reject the
+          # unresolved variable and every SafetyValidator(real permissions) test
+          # would fail. /home/runner is the runner's real home; the Documents
+          # subpaths need not exist because these tests check allow/deny logic,
+          # not filesystem I/O.
+          USERPROFILE: /home/runner

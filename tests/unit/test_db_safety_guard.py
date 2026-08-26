@@ -8,7 +8,7 @@ and confirm the suite refuses to run" validation.
 
 import pytest
 from conftest_db_guard import (
-    TestDatabaseSafetyError,
+    DatabaseSafetyError,
     redis_db_index,
     verify_test_database_url,
     verify_test_qdrant_collection,
@@ -18,23 +18,23 @@ from conftest_db_guard import (
 
 def test_rejects_production_database_name():
     prod_url = "postgresql+asyncpg://aether:pw@localhost:5432/aether"
-    with pytest.raises(TestDatabaseSafetyError, match="does not look like a test database"):
+    with pytest.raises(DatabaseSafetyError, match="does not look like a test database"):
         verify_test_database_url(prod_url)
 
 
 def test_rejects_empty_url():
-    with pytest.raises(TestDatabaseSafetyError, match="No test database URL"):
+    with pytest.raises(DatabaseSafetyError, match="No test database URL"):
         verify_test_database_url("")
 
 
 def test_rejects_unparseable_url():
-    with pytest.raises(TestDatabaseSafetyError, match="could not be parsed"):
+    with pytest.raises(DatabaseSafetyError, match="could not be parsed"):
         verify_test_database_url("this is not a url")
 
 
 def test_error_message_never_contains_password():
     prod_url = "postgresql+asyncpg://aether:SuperSecretPassword123@localhost:5432/aether"
-    with pytest.raises(TestDatabaseSafetyError) as exc_info:
+    with pytest.raises(DatabaseSafetyError) as exc_info:
         verify_test_database_url(prod_url)
     assert "SuperSecretPassword123" not in str(exc_info.value)
 
@@ -54,7 +54,7 @@ def test_accepts_in_memory_sqlite():
 
 
 def test_rejects_file_sqlite_without_test_marker():
-    with pytest.raises(TestDatabaseSafetyError):
+    with pytest.raises(DatabaseSafetyError):
         verify_test_database_url("sqlite+aiosqlite:///data/aether.db")
 
 
@@ -66,12 +66,12 @@ def test_marker_check_is_case_insensitive():
 
 
 def test_rejects_production_qdrant_collection():
-    with pytest.raises(TestDatabaseSafetyError, match="does not look like a test collection"):
+    with pytest.raises(DatabaseSafetyError, match="does not look like a test collection"):
         verify_test_qdrant_collection("episodic_memory")
 
 
 def test_rejects_empty_qdrant_collection():
-    with pytest.raises(TestDatabaseSafetyError, match="No test Qdrant collection"):
+    with pytest.raises(DatabaseSafetyError, match="No test Qdrant collection"):
         verify_test_qdrant_collection("")
 
 
@@ -87,7 +87,7 @@ def test_qdrant_marker_check_is_case_insensitive():
 
 
 def test_rejects_production_redis_index_zero():
-    with pytest.raises(TestDatabaseSafetyError, match="production default"):
+    with pytest.raises(DatabaseSafetyError, match="production default"):
         verify_test_redis_db_index(0)
 
 
@@ -104,11 +104,11 @@ def test_redis_db_index_parses_url_path():
 def test_redis_db_index_defaults_to_zero_when_absent():
     # No path segment -> production index 0 -> must be rejected by the verifier.
     assert redis_db_index("redis://127.0.0.1:6379") == 0
-    with pytest.raises(TestDatabaseSafetyError):
+    with pytest.raises(DatabaseSafetyError):
         verify_test_redis_db_index(redis_db_index("redis://127.0.0.1:6379"))
 
 
 def test_production_redis_url_is_rejected_end_to_end():
     prod_redis = "redis://127.0.0.1:6379/0"
-    with pytest.raises(TestDatabaseSafetyError, match="production default"):
+    with pytest.raises(DatabaseSafetyError, match="production default"):
         verify_test_redis_db_index(redis_db_index(prod_redis))

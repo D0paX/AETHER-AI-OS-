@@ -756,4 +756,14 @@ _Outcome:_ Aether can search/read/move within permitted directories, every path 
 
 **Validation:** gates green (ruff/format/mypy --strict 73/import-linter 4-kept-0-broken); `windows.py` proven to import with pywin32 blocked; the exact CI command with `local.yaml` hidden + the env var + `CUDA_VISIBLE_DEVICES` cleared → **292 passed, exit 0**. Could NOT confirm green on GitHub itself — gh is unauthenticated (no token), so `gh run watch` is unavailable; local reproduction is the strongest available evidence.
 
+### **Date:** 2026-08-26 4:32 PM
+
+**Task:** CI fix (follow-on) — Unit Tests still red on Linux after the prior guard/pywin32 fix. Root cause from the real GitHub log: `${USERPROFILE}` is unset on the Linux runner, so `.aether/permissions.yaml` expansion leaves `${USERPROFILE}` unresolved and the loader rejects it — every `SafetyValidator(REAL_PERMISSIONS_PATH)` test errors (78 failures/errors). CI-environment gap only; the loader and the Windows-targeted config are both correct.
+
+**Fixes (CI + test-infra only, no production code):**
+- **`ci.yml`:** set `USERPROFILE: /home/runner` on the unit-tests step (real runner home; the Documents subpaths need not exist — the tests check allow/deny logic, not I/O).
+- **Renamed** the test-support exception `TestDatabaseSafetyError` -> `DatabaseSafetyError` (in `tests/conftest_db_guard.py` + `tests/unit/test_db_safety_guard.py`) so pytest stops trying to collect it as a `Test*` class (a noisy `PytestCollectionWarning`).
+
+**Validation:** reproduced the exact 78 failures locally with `USERPROFILE` unset; normal-env run 267 passed (rename no regression); collection warning gone. The local Windows fix-sim is unfaithful (Git Bash rewrites `/home/runner` -> `C:\Program Files\Git\home\runner`, hitting a Windows forbidden path) — real confirmation is the GitHub Linux run.
+
 _(End of current log. Subsequent entries will be appended upon the completion of future milestones.)_
