@@ -23,6 +23,7 @@ from pydantic import ValidationError
 
 from aether.core.exceptions import ConfigurationError
 from aether.security import (
+    DenialReason,
     DestructiveOperation,
     Permission,
     SafetyValidator,
@@ -483,3 +484,81 @@ async def test_performance_targets(validator: SafetyValidator) -> None:
     p95 = samples[int(len(samples) * 0.95)]
     assert p50 < 10.0, f"p50 {p50:.3f}ms exceeds 10ms"
     assert p95 < 25.0, f"p95 {p95:.3f}ms exceeds 25ms"
+
+
+# =============================================================================
+# DEBT-022 — structured denial reason codes (callers branch on the code, never
+# on the human-readable reason string)
+# =============================================================================
+async def test_denial_reason_codes_for_file_operations(tmp_path: Path) -> None:
+    (tmp_path / "ok").mkdir()
+    cfg = write_config(
+        tmp_path,
+        filesystem={
+            "read_paths": [str(tmp_path / "ok")],
+            "write_paths": [str(tmp_path / "ok")],
+            "forbidden_paths": [str(tmp_path / "nope")],
+            "max_file_size_mb": 1,
+            "allow_hidden_files": False,
+        },
+    )
+    v = SafetyValidator(cfg)
+
+    forbidden = await v.validate_file_operation("file.read", tmp_path / "nope" / "f.txt")
+    assert (forbidden.allowed, forbidden.denial_reason) == (
+        False,
+        DenialReason.FORBIDDEN_PATH,
+    )
+
+    unknown_op = await v.validate_file_operation("file.frobnicate", tmp_path / "ok" / "f")
+    assert unknown_op.denial_reason is DenialReason.UNRECOGNIZED_OPERATION
+
+    hidden = await v.validate_file_operation("file.read", tmp_path / "ok" / ".secret")
+    assert hidden.denial_reason is DenialReason.HIDDEN_FILE
+
+    outside = await v.validate_file_operation("file.read", tmp_path / "elsewhere" / "f.txt")
+    assert outside.denial_reason is DenialReason.OUTSIDE_ALLOWED_PATHS
+
+    big = tmp_path / "ok" / "big.bin"
+    big.write_bytes(b"a" * (2 * 1024 * 1024))
+    oversized = await v.validate_file_operation("file.read", big)
+    assert oversized.denial_reason is DenialReason.SIZE_EXCEEDED
+
+    small = tmp_path / "ok" / "small.txt"
+    small.write_text("hi", encoding="utf-8")
+    allowed = await v.validate_file_operation("file.read", small)
+    assert (allowed.allowed, allowed.denial_reason) == (True, None)
+
+
+async def test_denial_reason_codes_for_app_and_browser(tmp_path: Path) -> None:
+    v = SafetyValidator(
+        write_config(
+            tmp_path,
+            applications={"allowed_launch": ["notepad.exe"], "forbidden_launch": ["cmd.exe"]},
+            network={"browser_automation_enabled": False, "blocked_domains": []},
+        )
+    )
+    assert (
+        await v.validate_app_launch("cmd.exe")
+    ).denial_reason is DenialReason.FORBIDDEN_EXECUTABLE
+    assert (
+        await v.validate_app_launch("unlisted.exe")
+    ).denial_reason is DenialReason.NOT_IN_ALLOWLIST
+    assert (await v.validate_app_launch("")).denial_reason is DenialReason.NO_EXECUTABLE
+    assert (await v.validate_app_launch("notepad.exe")).denial_reason is None
+    assert (
+        await v.validate_browser_action("https://example.com", "nav")
+    ).denial_reason is DenialReason.BROWSER_DISABLED
+
+    v2 = SafetyValidator(
+        write_config(
+            tmp_path, network={"browser_automation_enabled": True, "blocked_domains": ["evil.com"]}
+        )
+    )
+    assert (
+        await v2.validate_browser_action("https://evil.com/x", "nav")
+    ).denial_reason is DenialReason.BLOCKED_DOMAIN
+    assert (
+        await v2.validate_browser_action("not a url at all", "nav")
+    ).denial_reason is DenialReason.INVALID_DOMAIN
+    assert (await v2.validate_browser_action("https://example.com", "nav")).denial_reason is None

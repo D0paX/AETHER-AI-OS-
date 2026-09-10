@@ -34,6 +34,27 @@ class DestructiveOperation(StrEnum):
     PROCESS_TERMINATE = "process.terminate"
 
 
+class DenialReason(StrEnum):
+    """A structured, machine-readable code for WHY a check denied an action.
+
+    Set on ``ValidationResult.denial_reason`` for every denial (None on an
+    allow). Callers branch on this code — never on the human-readable
+    ``reason`` string, whose wording is not a stable contract (DEBT-022).
+    """
+
+    FORBIDDEN_PATH = "forbidden_path"
+    OUTSIDE_ALLOWED_PATHS = "outside_allowed_paths"
+    HIDDEN_FILE = "hidden_file"
+    SIZE_EXCEEDED = "size_exceeded"
+    UNRECOGNIZED_OPERATION = "unrecognized_operation"
+    NO_EXECUTABLE = "no_executable"
+    FORBIDDEN_EXECUTABLE = "forbidden_executable"
+    NOT_IN_ALLOWLIST = "not_in_allowlist"
+    BROWSER_DISABLED = "browser_disabled"
+    INVALID_DOMAIN = "invalid_domain"
+    BLOCKED_DOMAIN = "blocked_domain"
+
+
 class ValidationResult(BaseModel):
     """The outcome of a single ``SafetyValidator`` check.
 
@@ -46,6 +67,9 @@ class ValidationResult(BaseModel):
             destructive and the loaded policy requires explicit user
             confirmation before it runs. Meaningless (and always False) when
             ``allowed`` is False.
+        denial_reason: The structured code for a denial, or None on an allow.
+            Callers that must distinguish denial classes (e.g. "size exceeded,
+            truncate" vs "forbidden, refuse") branch on THIS, not on ``reason``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -53,6 +77,7 @@ class ValidationResult(BaseModel):
     allowed: bool
     reason: str
     requires_confirmation: bool = False
+    denial_reason: DenialReason | None = None
 
     @field_validator("reason")
     @classmethod

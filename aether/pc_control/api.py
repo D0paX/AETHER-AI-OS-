@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict
 
 from aether.core.exceptions import ToolExecutionError, ToolPermissionError
 from aether.core.logging import get_logger
-from aether.security import SafetyValidator, ValidationResult
+from aether.security import DenialReason, SafetyValidator, ValidationResult
 
 if TYPE_CHECKING:
     from aether.pc_control._control.file_ops import (
@@ -34,14 +34,6 @@ if TYPE_CHECKING:
     )
 
 logger = get_logger(__name__)
-
-# SafetyValidator's size-denial message phrase (M2.2). read_file downgrades a
-# size-only denial to a truncated read — M2.4 Section 6 requires oversized files
-# be truncated, not rejected — while every other denial stays fatal. The size
-# check runs LAST in validate_file_operation (after forbidden/allowlist/hidden),
-# so a size denial can only mean the path is otherwise permitted. Coupling to the
-# message is deliberate and documented; ValidationResult carries no status code.
-_SIZE_DENIAL_MARKER = "maximum file size"
 
 
 class PCAction(BaseModel):
@@ -285,8 +277,8 @@ class PCControlAPI:
         The path is resolved and validated for read access BEFORE the file is
         opened. Oversized files are truncated to the configured
         ``max_file_size_mb`` (``truncated=True``), never rejected outright — a
-        size-only denial from the validator is downgraded to a truncated read,
-        while a forbidden / out-of-bounds / hidden path stays a hard denial.
+        ``SIZE_EXCEEDED`` denial is downgraded to a truncated read, while a
+        forbidden / out-of-bounds / hidden path stays a hard denial.
 
         Args:
             path: The file to read.
@@ -304,7 +296,7 @@ class PCControlAPI:
         resolved = path.resolve()
         decision = await self._safety_validator.validate_file_operation("file.read", resolved)
         self._log_file_decision("read", resolved, decision)
-        if not decision.allowed and _SIZE_DENIAL_MARKER not in decision.reason:
+        if not decision.allowed and decision.denial_reason is not DenialReason.SIZE_EXCEEDED:
             raise ToolPermissionError(f"Read denied: {decision.reason}")
         try:
             return await file_ops.read_file(resolved, self._safety_validator.max_file_size_bytes)

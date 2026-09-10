@@ -940,3 +940,24 @@ name-match kill. The old `Stop-Process -Name "python" -Force` is gone.
   corrupt PID file while a bystander venv python survived each (proving no blanket
   kill), removed the PID file, and `docker compose down` preserved the named
   volumes.
+
+---
+
+## DEBT-022: File-size denial detection relied on string-matching a human-readable message
+
+**Priority:** P3
+**Status:** Resolved — via this commit (fix(security): DEBT-022)
+**Location:** aether/pc_control/api.py (read_file), aether/security/
+
+**Description:** Distinguishing a size-only denial (truncate and allow) from a
+hard denial (forbidden path, hidden file) keyed off matching "maximum file size"
+in `SafetyValidator`'s `ValidationResult.reason` string — correct at the time,
+but fragile against any future wording change to that message.
+
+**Resolution:** Added a structured `DenialReason` enum (FORBIDDEN_PATH,
+HIDDEN_FILE, SIZE_EXCEEDED, OUTSIDE_ALLOWED_PATHS, UNRECOGNIZED_OPERATION,
+NO_EXECUTABLE, FORBIDDEN_EXECUTABLE, NOT_IN_ALLOWLIST, BROWSER_DISABLED,
+INVALID_DOMAIN, BLOCKED_DOMAIN) and a `denial_reason: DenialReason | None` field
+on `ValidationResult`. Every denial branch in `SafetyValidator` now sets the
+code; `read_file` branches on `denial_reason is DenialReason.SIZE_EXCEEDED`. The
+`_SIZE_DENIAL_MARKER` string match is deleted entirely.

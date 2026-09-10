@@ -7,6 +7,7 @@ only — contains zero LLM calls anywhere, by design.
 """
 
 from aether.security.models import (
+    DenialReason,
     DestructiveOperation,
     Permission,
     ValidationResult,
@@ -18,4 +19,5 @@ __all__ = [
     "ValidationResult",
     "Permission",
     "DestructiveOperation",
+    "DenialReason",
 ]
