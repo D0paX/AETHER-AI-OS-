@@ -961,3 +961,24 @@ INVALID_DOMAIN, BLOCKED_DOMAIN) and a `denial_reason: DenialReason | None` field
 on `ValidationResult`. Every denial branch in `SafetyValidator` now sets the
 code; `read_file` branches on `denial_reason is DenialReason.SIZE_EXCEEDED`. The
 `_SIZE_DENIAL_MARKER` string match is deleted entirely.
+
+---
+
+## DEBT-023: search_files() validated only the search root, not each result
+
+**Priority:** P3
+**Status:** Resolved — via this commit (fix(pc_control): DEBT-023)
+**Location:** aether/pc_control/api.py (search_files)
+
+**Description:** search validated only the root directory, not each returned
+path. Not an active gap today — no forbidden path is nested under an allowed
+read_path in permissions.yaml — but it would become one the moment that changed
+(a forbidden or hidden path nested under an allowed root could surface in
+results).
+
+**Resolution:** `PCControlAPI.search_files` now validates EACH candidate with
+the same `validate_file_operation("file.read", ...)` gate used by `read_file`,
+keeping a result only if allowed — or size-denied (an oversized-but-permitted
+file is still *listed*, since search reports metadata, not content). Forbidden /
+hidden / out-of-bounds candidates are dropped. Test proves a forbidden path
+nested under an allowed root is excluded.

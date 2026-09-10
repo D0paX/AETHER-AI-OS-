@@ -247,8 +247,12 @@ class PCControlAPI:
 
         The root is resolved and validated for read access BEFORE the search
         runs; a root outside the permitted read paths (or inside a forbidden
-        path) is denied. Results are candidates for a caller to choose from —
-        this method never acts on any of them.
+        path) is denied. THEN every candidate is validated individually
+        (DEBT-023) so a forbidden or hidden path nested under an otherwise-allowed
+        root never leaks into the results — a candidate is kept only if it passes
+        the same read check, except that a size-only denial still lists it
+        (search reports a file's metadata, not its content). Results are
+        candidates for a caller to choose from — this method never acts on them.
 
         Args:
             query: A glob pattern, or a file-name substring if it has no glob
@@ -257,7 +261,7 @@ class PCControlAPI:
             filters: Optional extension / modified-after filters.
 
         Returns:
-            Matching files as FileInfo candidates.
+            Matching, individually-validated files as FileInfo candidates.
 
         Raises:
             ToolPermissionError: If the (resolved) root is not permitted.
@@ -269,7 +273,24 @@ class PCControlAPI:
         self._log_file_decision("search", resolved_root, decision)
         if not decision.allowed:
             raise ToolPermissionError(f"Search denied: {decision.reason}")
-        return file_ops.search_files(query, resolved_root, filters)
+
+        candidates = file_ops.search_files(query, resolved_root, filters)
+        approved: list[FileInfo] = []
+        for candidate in candidates:
+            result = await self._safety_validator.validate_file_operation(
+                "file.read", Path(candidate.path)
+            )
+            # Keep on allow; keep an oversized-but-permitted file too (search
+            # lists metadata, not content); drop forbidden / hidden / out-of-bounds.
+            if result.allowed or result.denial_reason is DenialReason.SIZE_EXCEEDED:
+                approved.append(candidate)
+        logger.info(
+            "pc_control.search_files.filtered",
+            root=str(resolved_root),
+            scanned=len(candidates),
+            returned=len(approved),
+        )
+        return approved
 
     async def read_file(self, path: Path) -> FileContent:
         """Read a file's content, gated by SafetyValidator.

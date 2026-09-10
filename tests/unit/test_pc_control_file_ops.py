@@ -321,3 +321,41 @@ async def test_search_performance(tmp_path: Path) -> None:
     p95 = samples[int(len(samples) * 0.95)]
     assert p50 < 1000.0, f"p50 {p50:.1f}ms"
     assert p95 < 2000.0, f"p95 {p95:.1f}ms"
+
+
+# =============================================================================
+# DEBT-023 — search validates every result, not only the root
+# =============================================================================
+async def test_search_excludes_forbidden_path_nested_under_allowed_root(
+    tmp_path: Path,
+) -> None:
+    public = tmp_path / "public"
+    public.mkdir()
+    (public / "ok.txt").write_text("x", encoding="utf-8")
+    secret = public / "secret"  # forbidden dir nested under the allowed read root
+    secret.mkdir()
+    (secret / "leaked.txt").write_text("x", encoding="utf-8")
+
+    api = PCControlAPI(
+        SafetyValidator(
+            _write_permissions(
+                tmp_path,
+                read=[str(public)],
+                write=[str(public)],
+                forbidden=[str(secret)],
+            )
+        )
+    )
+    results = await api.search_files("*.txt", public, FileSearchFilter())
+    names = sorted(Path(r.path).name for r in results)
+    assert names == ["ok.txt"]  # leaked.txt under the forbidden subdir is excluded
+    assert all("secret" not in r.path for r in results)
+
+
+async def test_search_still_lists_oversized_file(tmp_path: Path) -> None:
+    """A permitted-but-oversized file is still listed (search reports metadata)."""
+    big = tmp_path / "big.txt"
+    big.write_bytes(b"a" * (2 * 1024 * 1024))
+    api = _api(tmp_path, max_mb=1)
+    results = await api.search_files("*.txt", tmp_path, FileSearchFilter())
+    assert [Path(r.path).name for r in results] == ["big.txt"]
