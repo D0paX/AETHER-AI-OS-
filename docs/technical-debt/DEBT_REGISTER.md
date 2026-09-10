@@ -675,8 +675,14 @@ legitimate location (3/3 caught in audit testing).
 ## DEBT-016: Constitutional branch model (main + develop + phase/N) was never actually implemented
 
 **Priority:** P3 — not blocking current work
-**Status:** Open (resolution: before Phase 2 Closure, Step 25)
+**Status:** Resolved — governance, via cc8244a (ADR-012)
 **Location:** Repository branch structure; ADR-010 Section 7.1
+
+**Resolution:** ADR-012-SIMPLIFIED_BRANCH_MODEL.md (commit cc8244a) formally
+amends ADR-010 Section 7.1 via the Constitutional Amendment Process to retire
+the `develop` branch requirement (main + phase/N only), and corrects
+AETHER_PHASE_EXECUTION_WORKFLOW.md Steps 3/22/25 to match — the "simplify"
+option below, chosen deliberately.
 
 **Description:** No develop branch exists or has ever existed. phase/2
 was created directly off main with zero divergence until this session's
