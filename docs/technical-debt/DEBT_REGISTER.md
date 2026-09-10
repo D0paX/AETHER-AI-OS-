@@ -487,6 +487,42 @@ lifecycle across sequential GPU-touching tests within one process.
 **Target:** Dedicated remediation pass — not closed again on a small
 number of clean runs alone.
 
+**Investigation (this pass) — real native traceback captured, NOT the assumed
+mechanism:** Reproduced via `python -X faulthandler`. The crash is NOT a
+repeated-initialization pattern — it fires on the FIRST embedding-model load in
+the process, intermittently, deep inside torch/transformers weight loading:
+
+```
+Windows fatal exception: access violation
+  torch/storage.py:471 in __getitem__
+  transformers/modeling_utils.py:748 in _load_state_dict_into_meta_model
+  ... sentence_transformers/SentenceTransformer.__init__
+  aether/llm/_embedding.py (the SentenceTransformer load)
+```
+
+Two back-to-back runs of the known crash pair (test_fact_capture_live +
+test_memory_pipeline) showed the intermittency directly: run 1 loaded the model
+and ran to completion; run 2 segfaulted on the very first load. Because the fault
+is in the model's first weight-load, per-file module-scoped fixtures cannot
+prevent it, and the change below cannot eliminate it.
+
+**Mitigation applied (not a full fix):** `aether/llm/_embedding.py` now caches
+the loaded `SentenceTransformer` process-wide (keyed by model+device), so the
+model initializes exactly ONCE per process instead of on every
+`MemoryAPI.initialize()` (~10+ times across the full integration suite). Fewer
+load attempts = far fewer chances to hit the flaky fault per full-suite run, and
+it removes redundant ~1.3GB reloads in production. It does NOT make the first
+load safe.
+
+**Status stays Open — NOT resolved.** 10/10 clean full-suite runs are
+unreachable while the first load can flakily fault (a crash + native traceback
+was reproduced this pass), so the item is deliberately left open and the
+file-by-file workaround REMAINS the sanctioned way to run integration tests. Real
+fix direction is upstream: pin/upgrade torch+transformers to a combination whose
+meta-model state-dict load is stable on Windows, and/or load the embedding model
+once at process start outside the asyncio loop. Appears to correlate with memory
+pressure (Docker + Ollama + torch on a 16GB machine).
+
 ---
 
 ## DEBT-012: Memory retrieval fragile when Qdrant is unavailable — RESOLVED
