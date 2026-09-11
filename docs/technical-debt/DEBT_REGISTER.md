@@ -487,6 +487,42 @@ lifecycle across sequential GPU-touching tests within one process.
 **Target:** Dedicated remediation pass — not closed again on a small
 number of clean runs alone.
 
+**Investigation (this pass) — real native traceback captured, NOT the assumed
+mechanism:** Reproduced via `python -X faulthandler`. The crash is NOT a
+repeated-initialization pattern — it fires on the FIRST embedding-model load in
+the process, intermittently, deep inside torch/transformers weight loading:
+
+```
+Windows fatal exception: access violation
+  torch/storage.py:471 in __getitem__
+  transformers/modeling_utils.py:748 in _load_state_dict_into_meta_model
+  ... sentence_transformers/SentenceTransformer.__init__
+  aether/llm/_embedding.py (the SentenceTransformer load)
+```
+
+Two back-to-back runs of the known crash pair (test_fact_capture_live +
+test_memory_pipeline) showed the intermittency directly: run 1 loaded the model
+and ran to completion; run 2 segfaulted on the very first load. Because the fault
+is in the model's first weight-load, per-file module-scoped fixtures cannot
+prevent it, and the change below cannot eliminate it.
+
+**Mitigation applied (not a full fix):** `aether/llm/_embedding.py` now caches
+the loaded `SentenceTransformer` process-wide (keyed by model+device), so the
+model initializes exactly ONCE per process instead of on every
+`MemoryAPI.initialize()` (~10+ times across the full integration suite). Fewer
+load attempts = far fewer chances to hit the flaky fault per full-suite run, and
+it removes redundant ~1.3GB reloads in production. It does NOT make the first
+load safe.
+
+**Status stays Open — NOT resolved.** 10/10 clean full-suite runs are
+unreachable while the first load can flakily fault (a crash + native traceback
+was reproduced this pass), so the item is deliberately left open and the
+file-by-file workaround REMAINS the sanctioned way to run integration tests. Real
+fix direction is upstream: pin/upgrade torch+transformers to a combination whose
+meta-model state-dict load is stable on Windows, and/or load the embedding model
+once at process start outside the asyncio loop. Appears to correlate with memory
+pressure (Docker + Ollama + torch on a 16GB machine).
+
 ---
 
 ## DEBT-012: Memory retrieval fragile when Qdrant is unavailable — RESOLVED
@@ -675,8 +711,14 @@ legitimate location (3/3 caught in audit testing).
 ## DEBT-016: Constitutional branch model (main + develop + phase/N) was never actually implemented
 
 **Priority:** P3 — not blocking current work
-**Status:** Open (resolution: before Phase 2 Closure, Step 25)
+**Status:** Resolved — governance, via cc8244a (ADR-012)
 **Location:** Repository branch structure; ADR-010 Section 7.1
+
+**Resolution:** ADR-012-SIMPLIFIED_BRANCH_MODEL.md (commit cc8244a) formally
+amends ADR-010 Section 7.1 via the Constitutional Amendment Process to retire
+the `develop` branch requirement (main + phase/N only), and corrects
+AETHER_PHASE_EXECUTION_WORKFLOW.md Steps 3/22/25 to match — the "simplify"
+option below, chosen deliberately.
 
 **Description:** No develop branch exists or has ever existed. phase/2
 was created directly off main with zero divergence until this session's
@@ -934,3 +976,45 @@ name-match kill. The old `Stop-Process -Name "python" -Force` is gone.
   corrupt PID file while a bystander venv python survived each (proving no blanket
   kill), removed the PID file, and `docker compose down` preserved the named
   volumes.
+
+---
+
+## DEBT-022: File-size denial detection relied on string-matching a human-readable message
+
+**Priority:** P3
+**Status:** Resolved — via this commit (fix(security): DEBT-022)
+**Location:** aether/pc_control/api.py (read_file), aether/security/
+
+**Description:** Distinguishing a size-only denial (truncate and allow) from a
+hard denial (forbidden path, hidden file) keyed off matching "maximum file size"
+in `SafetyValidator`'s `ValidationResult.reason` string — correct at the time,
+but fragile against any future wording change to that message.
+
+**Resolution:** Added a structured `DenialReason` enum (FORBIDDEN_PATH,
+HIDDEN_FILE, SIZE_EXCEEDED, OUTSIDE_ALLOWED_PATHS, UNRECOGNIZED_OPERATION,
+NO_EXECUTABLE, FORBIDDEN_EXECUTABLE, NOT_IN_ALLOWLIST, BROWSER_DISABLED,
+INVALID_DOMAIN, BLOCKED_DOMAIN) and a `denial_reason: DenialReason | None` field
+on `ValidationResult`. Every denial branch in `SafetyValidator` now sets the
+code; `read_file` branches on `denial_reason is DenialReason.SIZE_EXCEEDED`. The
+`_SIZE_DENIAL_MARKER` string match is deleted entirely.
+
+---
+
+## DEBT-023: search_files() validated only the search root, not each result
+
+**Priority:** P3
+**Status:** Resolved — via this commit (fix(pc_control): DEBT-023)
+**Location:** aether/pc_control/api.py (search_files)
+
+**Description:** search validated only the root directory, not each returned
+path. Not an active gap today — no forbidden path is nested under an allowed
+read_path in permissions.yaml — but it would become one the moment that changed
+(a forbidden or hidden path nested under an allowed root could surface in
+results).
+
+**Resolution:** `PCControlAPI.search_files` now validates EACH candidate with
+the same `validate_file_operation("file.read", ...)` gate used by `read_file`,
+keeping a result only if allowed — or size-denied (an oversized-but-permitted
+file is still *listed*, since search reports metadata, not content). Forbidden /
+hidden / out-of-bounds candidates are dropped. Test proves a forbidden path
+nested under an allowed root is excluded.

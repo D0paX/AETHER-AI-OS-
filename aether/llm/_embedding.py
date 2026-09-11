@@ -1,38 +1,64 @@
 """Local embedding service using sentence-transformers."""
 
 import asyncio
+import threading
+from typing import TYPE_CHECKING
 
 from aether.core.config import EMBEDDING_DIMENSION, get_config
 from aether.core.exceptions import ConfigurationError
 from aether.core.logging import get_logger
 from aether.llm._models import Embedding
 
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
+
 logger = get_logger("aether.llm.embedding")
+
+# Process-wide cache of loaded models, keyed by (model_name, device). Loading a
+# SentenceTransformer re-initializes torch/transformers; doing so more than once
+# in a single process is the trigger for the native Windows access-violation
+# crash tracked as DEBT-011 (root-caused via DEBT-006). Caching the loaded model
+# means it initializes EXACTLY ONCE per (model, device) for the life of the
+# process — for every EmbeddingService instance, in tests and in production
+# alike. The lock makes the first, concurrent construction safe.
+_MODEL_CACHE: dict[tuple[str, str], "SentenceTransformer"] = {}
+_MODEL_CACHE_LOCK = threading.Lock()
 
 
 class EmbeddingService:
     """Service for generating vector embeddings locally."""
 
     def __init__(self) -> None:
-        """Initialize the embedding model locally."""
+        """Initialize the embedding model locally (reusing a cached load)."""
         config = get_config()
         model_name = config.memory.embedding_model
         device = config.memory.embedding_device
 
-        logger.info(
-            "Loading local embedding model",
-            model_name=model_name,
-            device=device,
-        )
+        cache_key = (model_name, device)
+        with _MODEL_CACHE_LOCK:
+            cached = _MODEL_CACHE.get(cache_key)
+            if cached is not None:
+                logger.info(
+                    "Reusing cached embedding model",
+                    model_name=model_name,
+                    device=device,
+                )
+                self._model = cached
+            else:
+                logger.info(
+                    "Loading local embedding model",
+                    model_name=model_name,
+                    device=device,
+                )
+                try:
+                    from sentence_transformers import SentenceTransformer
 
-        try:
-            from sentence_transformers import SentenceTransformer
-
-            self._model = SentenceTransformer(model_name, device=device)
-        except Exception as e:
-            raise ConfigurationError(
-                f"Failed to load sentence-transformers model '{model_name}': {e}"
-            ) from e
+                    self._model = SentenceTransformer(model_name, device=device)
+                except Exception as e:
+                    raise ConfigurationError(
+                        f"Failed to load sentence-transformers model '{model_name}': {e}"
+                    ) from e
+                _MODEL_CACHE[cache_key] = self._model
 
         # Validate dimensions
         dimensions = self._model.get_sentence_embedding_dimension()

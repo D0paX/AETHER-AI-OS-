@@ -18,7 +18,12 @@ from urllib.parse import urlparse
 
 from aether.core.logging import get_logger
 from aether.security._permissions_loader import PermissionsConfig, load_permissions
-from aether.security.models import DestructiveOperation, Permission, ValidationResult
+from aether.security.models import (
+    DenialReason,
+    DestructiveOperation,
+    Permission,
+    ValidationResult,
+)
 
 logger = get_logger(__name__)
 
@@ -157,6 +162,7 @@ class SafetyValidator:
         allowed: bool,
         reason: str,
         requires_confirmation: bool = False,
+        denial_reason: DenialReason | None = None,
         context: dict[str, str],
     ) -> ValidationResult:
         """Build a ValidationResult and write the ADR-010 audit-trail entry."""
@@ -164,11 +170,13 @@ class SafetyValidator:
             allowed=allowed,
             reason=reason,
             requires_confirmation=requires_confirmation,
+            denial_reason=denial_reason,
         )
         logger.info(
             event,
             allowed=result.allowed,
             requires_confirmation=result.requires_confirmation,
+            denial_reason=result.denial_reason,
             reason=result.reason,
             **{key: _truncate(str(value)) for key, value in context.items()},
         )
@@ -231,6 +239,7 @@ class SafetyValidator:
                     event,
                     allowed=False,
                     reason=(f"Denied: '{path}' is within forbidden path '{forbidden}'."),
+                    denial_reason=DenialReason.FORBIDDEN_PATH,
                     context=ctx,
                 )
 
@@ -245,6 +254,7 @@ class SafetyValidator:
                     f"(fail-closed; expected one of "
                     f"{sorted(_READ_FILE_OPERATIONS | _WRITE_FILE_OPERATIONS)})."
                 ),
+                denial_reason=DenialReason.UNRECOGNIZED_OPERATION,
                 context=ctx,
             )
 
@@ -253,6 +263,7 @@ class SafetyValidator:
                 event,
                 allowed=False,
                 reason=(f"Denied: '{path}' is a hidden path and allow_hidden_files is false."),
+                denial_reason=DenialReason.HIDDEN_FILE,
                 context=ctx,
             )
 
@@ -270,6 +281,7 @@ class SafetyValidator:
                     f"Denied: '{path}' is not within any permitted {access} "
                     f"path (fail-closed default)."
                 ),
+                denial_reason=DenialReason.OUTSIDE_ALLOWED_PATHS,
                 context=ctx,
             )
 
@@ -281,6 +293,7 @@ class SafetyValidator:
                     f"Denied: '{path}' exceeds the maximum file size of "
                     f"{self._config.filesystem.max_file_size_mb} MB."
                 ),
+                denial_reason=DenialReason.SIZE_EXCEEDED,
                 context=ctx,
             )
 
@@ -335,6 +348,7 @@ class SafetyValidator:
                 event,
                 allowed=False,
                 reason="Denied: no executable name given (fail-closed).",
+                denial_reason=DenialReason.NO_EXECUTABLE,
                 context={"executable": executable},
             )
 
@@ -343,6 +357,7 @@ class SafetyValidator:
                 event,
                 allowed=False,
                 reason=f"Denied: '{base}' is in the forbidden_launch list.",
+                denial_reason=DenialReason.FORBIDDEN_EXECUTABLE,
                 context={"executable": executable},
             )
 
@@ -361,6 +376,7 @@ class SafetyValidator:
                 f"Denied: '{base}' is not in the allowed_launch list "
                 f"(fail-closed default; unlisted executables are denied)."
             ),
+            denial_reason=DenialReason.NOT_IN_ALLOWLIST,
             context={"executable": executable},
         )
 
@@ -390,6 +406,7 @@ class SafetyValidator:
                 event,
                 allowed=False,
                 reason="Denied: browser automation is disabled by policy.",
+                denial_reason=DenialReason.BROWSER_DISABLED,
                 context=ctx,
             )
 
@@ -401,6 +418,7 @@ class SafetyValidator:
                 event,
                 allowed=False,
                 reason=f"Denied: '{url}' has no parseable, well-formed domain (fail-closed).",
+                denial_reason=DenialReason.INVALID_DOMAIN,
                 context=ctx,
             )
 
@@ -410,6 +428,7 @@ class SafetyValidator:
                     event,
                     allowed=False,
                     reason=f"Denied: domain '{host}' matches blocked domain '{blocked}'.",
+                    denial_reason=DenialReason.BLOCKED_DOMAIN,
                     context=ctx,
                 )
 

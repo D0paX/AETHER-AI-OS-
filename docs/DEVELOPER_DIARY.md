@@ -766,4 +766,16 @@ _Outcome:_ Aether can search/read/move within permitted directories, every path 
 
 **Validation:** reproduced the exact 78 failures locally with `USERPROFILE` unset; normal-env run 267 passed (rename no regression); collection warning gone. The local Windows fix-sim is unfaithful (Git Bash rewrites `/home/runner` -> `C:\Program Files\Git\home\runner`, hitting a Windows forbidden path) — real confirmation is the GitHub Linux run.
 
+### **Date:** 2026-09-11 3:21 AM
+
+**Task:** Open-debt closeout before M2.5 — DEBT-016, DEBT-022, DEBT-023, DEBT-011. Four separate commits.
+
+**Engineering Notes:**
+- **DEBT-016 (Resolved, governance):** register entry synced to cc8244a (ADR-012 amended ADR-010 §7.1 + workflow Steps 3/22/25). Text-only.
+- **DEBT-022 (Resolved):** added `DenialReason(StrEnum)` + `denial_reason` field on `ValidationResult`; every SafetyValidator denial branch sets its code; `read_file` now branches on `denial_reason is SIZE_EXCEEDED` and the `"maximum file size"` string-match is deleted.
+- **DEBT-023 (Resolved):** `PCControlAPI.search_files` validates EACH candidate (not just the root) with the same read gate, keeping a result only if allowed or size-denied (oversized still listed); forbidden/hidden/out-of-bounds dropped. Test proves a forbidden path nested under an allowed root is excluded.
+- **DEBT-011 (NOT resolved — real mechanism found):** ran the known crash pair as one invocation twice under `python -X faulthandler`: run 1 clean, run 2 **segfaulted on the FIRST embedding-model load** — `torch.storage.__getitem__` → `transformers._load_state_dict_into_meta_model` → SentenceTransformer load. So it is an intermittent native access violation in torch/transformers *first* weight-load, NOT the assumed repeated-init; per-file module-scoped fixtures can't prevent a first-load fault. Applied a **mitigation** (not a fix): `EmbeddingService` caches the model process-wide (one load per process vs ~10+ across the suite → far less crash exposure, plus a production win). Left **Open**; file-by-file workaround kept; real fix is upstream (torch/transformers version, or load-once-at-startup). Per the task's "if it still crashes, capture the traceback and report — don't guess further", I stopped at the reproduced crash + traceback rather than tallying 10 predetermined-non-clean full runs.
+
+**Validation:** ruff / format / mypy --strict (73) / import-linter (4 kept-0 broken) all clean; non-integration suite 296 passed (adds the DEBT-022/023 tests); DEBT-022 grep clean (no "maximum file size" match in pc_control source).
+
 _(End of current log. Subsequent entries will be appended upon the completion of future milestones.)_
